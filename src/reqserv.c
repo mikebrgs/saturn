@@ -23,6 +23,45 @@ typedef int state;
 
 #define BUFFER_SIZE 128
 
+#define success 200
+#define error 201
+
+state GetDespatch(int *cs_fd,
+  char **splitted_buffer,
+  struct sockaddr_in *cs_addr) {
+  char cs_buffer[BUFFER_SIZE];
+  int tmp;
+
+  memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
+  strcat(cs_buffer, "GET_DS_SERVER ");
+  strcat(cs_buffer, *splitted_buffer);
+  printf("reqserv: request: %s\n", cs_buffer);
+  int n = sendto(*cs_fd,
+    cs_buffer,
+    sizeof(char)*strlen(cs_buffer),
+    0, (struct sockaddr*)cs_addr,
+    sizeof(*cs_addr));
+  if (n == -1) {
+    char error_buffer[1024];
+    perror(error_buffer);
+    printf("reqserv: sendto() error - %s\n", error_buffer);
+    return error;
+  }
+  // Waiting for response
+  memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
+  n=recvfrom(*cs_fd,
+    cs_buffer,
+    BUFFER_SIZE,
+    0,(struct sockaddr*)&cs_addr,&tmp);
+  if (n==-1) {
+    char error_buffer[1024];
+    perror(error_buffer);
+    printf("reqserv: recvfrom() error - %s\n", error_buffer);
+    return error;
+  }
+  printf("reqserv: response: %s\n", cs_buffer);
+}
+
 int main(int argc, char const *argv[]) {
   // Reading input options
   struct sockaddr_in cs_addr;
@@ -73,8 +112,6 @@ int main(int argc, char const *argv[]) {
 
   state reqserv_state = disconnected;
   char kb_buffer[BUFFER_SIZE];
-  char cs_buffer[BUFFER_SIZE];
-  int tmp;
 
   while (reqserv_state != exiting) {
     printf("user: ");
@@ -89,29 +126,12 @@ int main(int argc, char const *argv[]) {
       if (splitted_buffer==NULL) {
         goto invalid;
       }
-      // Requesting service
-      strcat(cs_buffer, "GET_DS_SERVER ");
-      strcat(cs_buffer, splitted_buffer);
-      int n = sendto(cs_fd,
-        cs_buffer,
-        sizeof(char)*strlen(cs_buffer),
-        0, (struct sockaddr*)&cs_addr,
-        sizeof(cs_addr));
-      if (n == -1) {
-        printf("reqserv: sendto() error\n");
+      if (GetDespatch(&cs_fd,
+        &splitted_buffer,
+        &cs_addr) == error) {
+        printf("reqserv: error in GetDespatch()\n");
         continue;
       }
-      // Waiting for response
-      memset((void*)&cs_buffer, (int)'\0', sizeof(cs_buffer));
-      n=recvfrom(cs_fd,
-        cs_buffer,
-        BUFFER_SIZE,
-        0,(struct sockaddr*)&cs_addr,&tmp);
-      if (n==-1) {
-        printf("reqserv: recvfrom() error\n");
-        continue;
-      }
-      printf("reqserv: %s\n", cs_buffer);
       reqserv_state = connected;
     }
     // Disconnection of central service
