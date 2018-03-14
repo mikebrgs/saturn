@@ -1,0 +1,3 @@
+struct fsmachine {
+  int state;
+}
