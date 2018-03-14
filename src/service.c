@@ -53,6 +53,7 @@ state GetStart(int *cs_fd,
   strcat(cs_buffer, service_net->service_id);
   strcat(cs_buffer, ";");
   strcat(cs_buffer, service_net->id);
+  printf("service:request: %s\n", cs_buffer);
   // Enquiring the central server
   int n = sendto(*cs_fd,
     cs_buffer,
@@ -77,7 +78,7 @@ state GetStart(int *cs_fd,
     return error;
   }
   // printf("RECV\n");
-  printf("service: %s\n", cs_buffer);
+  printf("service: response: %s\n", cs_buffer);
   char join_response[BUFFER_SIZE];
   memset((void*)&join_response, (int)'\0', sizeof(char)*BUFFER_SIZE);
   strcpy(join_response, "OK ");
