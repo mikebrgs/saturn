@@ -26,9 +26,21 @@ typedef int state;
 #define success 200
 #define error 201
 
+typedef struct Server {
+  char id [BUFFER_SIZE];
+  char ip[16];
+  char port[16];
+} Server;
+
+typedef struct Connection {
+  int fd;
+  struct sockaddr_in addr;
+} Connection;
+
 state GetDespatch(int *cs_fd,
   char **splitted_buffer,
-  struct sockaddr_in *cs_addr) {
+  struct sockaddr_in *cs_addr,
+  Server *server) {
   char cs_buffer[BUFFER_SIZE];
   int tmp;
 
@@ -47,7 +59,7 @@ state GetDespatch(int *cs_fd,
     printf("reqserv: sendto() error - %s\n", error_buffer);
     return error;
   }
-  // Waiting for response
+  // Waiting and saving response
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
   n=recvfrom(*cs_fd,
     cs_buffer,
@@ -59,7 +71,85 @@ state GetDespatch(int *cs_fd,
     printf("reqserv: recvfrom() error - %s\n", error_buffer);
     return error;
   }
+  cs_buffer[strlen(cs_buffer)] = ';';
   printf("reqserv: response: %s\n", cs_buffer);
+  char *splitted_buffer_recv = strtok(cs_buffer, " ");
+  splitted_buffer_recv = strtok(NULL, ";");
+  if (splitted_buffer_recv == NULL) {
+    return error;
+  }
+  strcpy(server->id, splitted_buffer_recv);
+  splitted_buffer_recv = strtok(NULL, ";");
+  if (splitted_buffer_recv == NULL) {
+    return error;
+  }
+  strcpy(server->ip, splitted_buffer_recv);
+    splitted_buffer_recv = strtok(NULL, ";");
+  if (splitted_buffer_recv == NULL) {
+    return error;
+  }
+  strcpy(server->port, splitted_buffer_recv);
+}
+
+state StartService(Server * server_data,
+  Connection * server_connection) {
+
+  if ((server_connection->fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+    return error;
+  }
+
+  memset((void*)&(server_connection->addr), (int)'\0', sizeof(server_connection->addr));
+  server_connection->addr.sin_family = AF_INET;
+  if (inet_aton(server_data->ip, &server_connection->addr.sin_addr) == 0) {
+    return error;
+  }
+  server_connection->addr.sin_port = htons(atoi(server_data->port));
+
+  char server_buffer[BUFFER_SIZE];
+  memset((void*)&(server_buffer), (int)'\0', sizeof(server_buffer));
+  strcpy(server_buffer, "MY_SERVICE ON");
+  if (sendto(server_connection->fd, server_buffer,
+    strlen(server_buffer)*sizeof(char), 0,
+    (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
+    return error;
+  }
+  int addrlen;
+  if (recvfrom(server_connection->fd, server_buffer,
+    BUFFER_SIZE, 0,
+    (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
+    return error;
+  }
+
+  if (strcmp(server_buffer, "YOUR_SERVICE ON") != 0) {
+    return error;
+  }
+
+  return success;
+}
+
+state EndService(Server * server_data,
+  Connection * server_connection) {
+  char server_buffer[BUFFER_SIZE];
+  memset((void*)&(server_buffer), (int)'\0', sizeof(server_buffer));
+  strcpy(server_buffer, "MY_SERVICE OFF");
+  if (sendto(server_connection->fd, server_buffer,
+    strlen(server_buffer)*sizeof(char), 0,
+    (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
+    return error;
+  }
+  int addrlen;
+  if (recvfrom(server_connection->fd, server_buffer,
+    BUFFER_SIZE, 0,
+    (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
+    return error;
+  }
+
+  if (strcmp(server_buffer, "YOUR_SERVICE OFF") != 0) {
+    return error;
+  }
+
+  close(server_connection->fd);
+  return success;
 }
 
 int main(int argc, char const *argv[]) {
@@ -67,6 +157,9 @@ int main(int argc, char const *argv[]) {
   struct sockaddr_in cs_addr;
   struct hostent *h;
   int cs_fd;
+  Server server_data;
+  Connection server_connection;
+
   memset((void*)&cs_addr, (int)'\0', sizeof(cs_addr));
   cs_addr.sin_family = AF_INET;
 
@@ -120,26 +213,34 @@ int main(int argc, char const *argv[]) {
     char * splitted_buffer = strtok(kb_buffer, " ");
     // State evaluation
     // Connection to central service
-    if (strcmp(splitted_buffer, "request_service")==0
+    if ((strcmp(splitted_buffer, "request_service")==0
+      || strcmp(splitted_buffer, "rs") == 0)
       && reqserv_state == disconnected) {
       splitted_buffer = strtok(NULL, " ");
       if (splitted_buffer==NULL) {
         goto invalid;
       }
-      if (GetDespatch(&cs_fd,
-        &splitted_buffer,
-        &cs_addr) == error) {
+      if (GetDespatch(&cs_fd, &splitted_buffer, &cs_addr, &server_data) == error) {
         printf("reqserv: error in GetDespatch()\n");
         continue;
       }
+      if (StartService(&server_data, &server_connection) == error) {
+        printf("reqserv: error in StartService()\n");
+        continue;
+      }
       reqserv_state = connected;
+      printf("reqserv: connected\n");
     }
     // Disconnection of central service
-    else if (strcmp(splitted_buffer, "terminate_service")==0
+    else if ((strcmp(splitted_buffer, "terminate_service")==0
+      || strcmp(splitted_buffer, "ts") == 0)
       && reqserv_state == connected) {
-      // send to
+      if (EndService(&server_data, &server_connection) == error) {
+        printf("reqserv: error in EndService()\n");
+        continue;
+      }
       reqserv_state = disconnected;
-      printf("terminating service\n");
+      printf("reqserv: disconnected\n");
     }
     // Exit client
     else if(strcmp(splitted_buffer, "exit")==0
