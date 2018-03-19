@@ -95,12 +95,14 @@ state StartService(Server * server_data,
   Connection * server_connection) {
 
   if ((server_connection->fd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+    printf("1\n");
     return error;
   }
 
   memset((void*)&(server_connection->addr), (int)'\0', sizeof(server_connection->addr));
   server_connection->addr.sin_family = AF_INET;
   if (inet_aton(server_data->ip, &server_connection->addr.sin_addr) == 0) {
+    printf("2\n");
     return error;
   }
   server_connection->addr.sin_port = htons(atoi(server_data->port));
@@ -111,17 +113,22 @@ state StartService(Server * server_data,
   if (sendto(server_connection->fd, server_buffer,
     strlen(server_buffer)*sizeof(char), 0,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
+    printf("3\n");
     return error;
   }
+  printf("reqserv: request: %s\n", server_buffer);
   int addrlen;
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
     (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
+    printf("4\n");
     return error;
   }
+  printf("reqserv: response: %s\n", server_buffer);
 
   if (strcmp(server_buffer, "YOUR_SERVICE ON") != 0) {
     return error;
+    printf("5\n");
   }
 
   return success;
@@ -143,11 +150,9 @@ state EndService(Server * server_data,
     (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
     return error;
   }
-
   if (strcmp(server_buffer, "YOUR_SERVICE OFF") != 0) {
     return error;
   }
-
   close(server_connection->fd);
   return success;
 }
@@ -209,6 +214,7 @@ int main(int argc, char const *argv[]) {
   while (reqserv_state != exiting) {
     printf("user: ");
     fgets(kb_buffer, BUFFER_SIZE, stdin);
+    if (strlen(kb_buffer) <= 1) continue;
     kb_buffer[strlen(kb_buffer)-1]='\0';
     char * splitted_buffer = strtok(kb_buffer, " ");
     // State evaluation
