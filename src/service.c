@@ -53,8 +53,6 @@ typedef struct ServerNet {
   char ip[16];
   char udp_port[16];
   char tcp_port[16];
-  bool is_start;
-  bool is_despatch;
   char service_id[BUFFER_SIZE];
   Server next_server;
 } ServerNet;
@@ -67,6 +65,8 @@ typedef struct Connection {
 // Global variables
 state service_state = disconnected;
 state ring_state = disconnected;
+bool despatch_state = false;
+bool start_state = false;
 
 int Max(int a, int b) {
   if (a > b) {
@@ -147,7 +147,7 @@ state GetStart(int *cs_fd,
 state SetStart(int *cs_fd,
   ServerNet * service_net,
   struct sockaddr_in * cs_addr) {
-  char cs_buffer[128];
+  char cs_buffer[BUFFER_SIZE];
   int tmp;
 
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
@@ -168,6 +168,7 @@ state SetStart(int *cs_fd,
     sizeof(*cs_addr));
   if (n == -1) {
     char error_buffer[1024];
+    memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
     perror(error_buffer);
     printf("service: sendto() error - %s\n", error_buffer);
     return error;
@@ -175,12 +176,11 @@ state SetStart(int *cs_fd,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  n=recvfrom(*cs_fd,
-    cs_buffer,
-    BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,&tmp);
+  n = recvfrom(*cs_fd, cs_buffer, BUFFER_SIZE*sizeof(char),
+    0,(struct sockaddr*)cs_addr, &tmp);
   if (n==-1) {
     char error_buffer[1024];
+    memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
     perror(error_buffer);
     printf("service: recvfrom() error - %s\n", error_buffer);
     return error;
@@ -248,6 +248,96 @@ state SetDespatch(int *cs_fd,
     printf("service: error with central service\n");
     return error;
   }
+  return success;
+}
+
+state OpenServiceServer(ServerNet *service_net,
+  Connection *listen_server) {
+  memset((void*)&(listen_server->addr), (int)'\0', sizeof(listen_server->addr));
+  listen_server->addr.sin_family = AF_INET;
+  listen_server->addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  listen_server->addr.sin_port = htons(atoi(service_net->tcp_port));
+  if (bind(listen_server->fd, (struct sockaddr*)(&listen_server->addr),
+    sizeof(listen_server->addr)) == -1) {
+    return error;
+  }
+  if (listen(listen_server->fd, 5) == -1) {
+    return error;
+  }
+  return success;
+}
+
+state ConnectNewServer(ServerNet *service_net,
+  Connection *listen_server,
+  Connection *prev_server,
+  Connection *next_server) {
+  int addrlen;
+  prev_server->fd = accept(listen_server->fd,
+    (struct sockaddr*)&(listen_server->addr), &addrlen);
+  if (prev_server->fd == -1) {
+    return error;
+  }
+  char request_buffer[BUFFER_SIZE];
+  memset((void*)&request_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  if (read(prev_server->fd, request_buffer, BUFFER_SIZE) == -1) {
+    return error;
+  }
+  printf("service: request: %s", request_buffer);
+  char *splitted_buffer = strtok(request_buffer, " ");
+  if (strcmp(splitted_buffer, "NEW") != 0) {
+    return error;
+  }
+  // Server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_id[BUFFER_SIZE];
+  memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_id, splitted_buffer);
+  // Server IP
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_ip[BUFFER_SIZE];
+  memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_ip, splitted_buffer);
+  // Server Port
+  splitted_buffer = strtok(NULL, "\n");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_port[BUFFER_SIZE];
+  memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_port, splitted_buffer);
+
+  // prev_server will listen to the connection with the new server.
+  prev_server->addr = listen_server->addr;
+  printf("HERE1\n");
+  if (next_server->fd == -1) {
+    next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (next_server->fd == -1) {
+      return error;
+    }
+    // next server uses recorded addr
+    memset((void*)&(next_server->addr), (int)'\0', sizeof(next_server->addr));
+    next_server->addr.sin_family = AF_INET;
+    if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
+      return error;
+    }
+    next_server->addr.sin_port = htons(atoi(new_server_port));
+    printf("HERE2\n");
+    if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
+      sizeof(next_server->addr)) == -1) {
+      return error;
+    }
+    printf("HERE3\n");
+  }
+
+  // Remove afterwards
+  close(prev_server->fd);
+  close(next_server->fd);
   return success;
 }
 
@@ -332,7 +422,6 @@ state JoinRing(ServerNet * service_net,
 
   return success;
 }
-
 
 state WithdrawDespatch(int *cs_fd,
   ServerNet * service_net,
@@ -433,10 +522,12 @@ state WithdrawStart(int *cs_fd,
 }
 
 state ClassifyToken() {
+
   return error;
 }
 
-state SendToken() {
+state SendMessage() {
+
   return error;
 }
 
@@ -510,18 +601,26 @@ int main(int argc, char const *argv[])
     printf("service: socket() error\n");
     exit(1);
   }
+  Connection listen_server;
+  listen_server.fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (listen_server.fd == -1) {
+    printf("service: socket() error\n");
+    exit(1);
+  }
   Connection next_server;
-  next_server.fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (next_server.fd == -1) {
-    printf("service: socket() error\n");
-    exit(1);
-  }
+  next_server.fd = -1;
+  // next_server.fd = socket(AF_INET, SOCK_STREAM, 0);
+  // if (next_server.fd == -1) {
+  //   printf("service: socket() error\n");
+  //   exit(1);
+  // }
   Connection prev_server;
-  prev_server.fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (prev_server.fd == -1) {
-    printf("service: socket() error\n");
-    exit(1);
-  }
+  prev_server.fd = -1;
+  // prev_server.fd = socket(AF_INET, SOCK_STREAM, 0);
+  // if (prev_server.fd == -1) {
+  //   printf("service: socket() error\n");
+  //   exit(1);
+  // }
   Connection client;
   client.fd = socket(AF_INET, SOCK_DGRAM, 0);
   if (client.fd == -1) {
@@ -611,16 +710,19 @@ int main(int argc, char const *argv[])
     return 1;
   }
 
+  // Parameters necessary fo running the program
   char kb_buffer[128];
   int max_fd = -1;
+  // Start listening to the TCP port
+  OpenServiceServer(&service_net, &listen_server);
   printf("user: ");
   fflush(stdout);
 
   while (service_state != exiting) {
     // Preparing multitasking
     FD_ZERO(&rfds);
-    FD_SET(prev_server.fd, &rfds);
-    max_fd = prev_server.fd;
+    FD_SET(listen_server.fd, &rfds);
+    max_fd = listen_server.fd;
     FD_SET(fileno(stdin), &rfds);
     max_fd = Max(max_fd, fileno(stdin));
     // If it's available, listen to clients
@@ -660,6 +762,8 @@ int main(int argc, char const *argv[])
               printf("service: start success\n");
               service_state = available;
               ring_state = available;
+              start_state = true;
+              despatch_state = true;
             } else {
               printf("service: start error\n");
             }
@@ -696,7 +800,21 @@ int main(int argc, char const *argv[])
         printf("Successor...\n");
       } else if (strcmp(splitted_buffer, "leave")==0
         && service_state == available) {
-        printf("service: left\n");
+        if (despatch_state == true) {
+          if (WithdrawDespatch(&cs_fd, &service_net, &cs_addr) != success) {
+            printf("service: error leaving despatch\n");
+          } else {
+            despatch_state = false;
+          }
+        }
+        if (start_state == true) {
+          if (WithdrawStart(&cs_fd, &service_net, &cs_addr) != success) {
+            printf("service: error leaving start\n");
+          } else {
+            start_state = false;
+          }
+        }
+        printf("service: left ring\n");
         service_state = disconnected;
       } else if (strcmp(splitted_buffer, "exit")==0
       && service_state == disconnected) {
@@ -711,10 +829,21 @@ int main(int argc, char const *argv[])
       fflush(stdout);
     }
 
-    // Socket action - servers
-    if (FD_ISSET(prev_server.fd, &rfds)) {
-      // Manage tokens
+    // Socket action - new server contacting
+    if (FD_ISSET(listen_server.fd, &rfds)) {
+      switch(ConnectNewServer(&service_net, &listen_server,
+        &prev_server, &next_server)) {
+        case success :
+          printf("service: server connected\n");
+          break;
+        default :
+          printf("service: server invalid \n");
+          break;
+      }
     }
+    // Socket action - previous
+
+    // Socket action - next
 
     if (FD_ISSET(client.fd, &rfds)) {
       switch (InteractClient(&client)) {
@@ -729,90 +858,6 @@ int main(int argc, char const *argv[])
           break;
       }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    // continue;
-    // printf("user: ");
-    // fgets(kb_buffer, BUFFER_SIZE, stdin);
-    // kb_buffer[strlen(kb_buffer)-1]='\0';
-    // char * splitted_buffer = strtok(kb_buffer, " ");
-    // // 
-    // if (strcmp(splitted_buffer, "join")==0
-    //   && service_state == disconnected) {
-    //   splitted_buffer = strtok(NULL, " ");
-    //   if (splitted_buffer==NULL) {
-    //     goto invalid;
-    //   }
-    //   strcpy(service_net.service_id, splitted_buffer);
-    //   switch (GetStart(&cs_fd,
-    //     &service_net,
-    //     &cs_addr)) {
-    //     case start :
-    //       if (SetStart(&cs_fd,
-    //         &service_net,
-    //         &cs_addr) == success
-    //         && SetDespatch(&cs_fd,
-    //         &service_net,
-    //         &cs_addr) == success) {
-    //         service_net.is_start = true;
-    //         service_net.is_despatch = true;
-    //         printf("service: started ring and ds\n");
-    //       } else {
-    //         printf("service: error starting ring or ds\n");
-    //       }
-    //       break;
-    //     case join :
-    //       printf("service: join ring\n");
-    //       break;
-    //     case error :
-    //       printf("service: error in GetStart()\n");
-    //       continue;
-    //   }
-    //   service_state = available;
-    // }
-    // else if (strcmp(splitted_buffer, "show_state")==0) {
-    //   printf("service: state\n");
-    // }
-    // else if (strcmp(splitted_buffer, "leave")==0
-    //   && service_state == available) {
-    //   if (service_net.is_despatch 
-    //     && WithdrawDespatch(&cs_fd,
-    //       &service_net,
-    //       &cs_addr) == success){
-    //     service_net.is_despatch = false;
-    //   } else {printf("error in despatch\n");}
-    //   if (service_net.is_start
-    //     && WithdrawStart(&cs_fd,
-    //       &service_net,
-    //       &cs_addr) == success) {
-    //     service_net.is_start = false;
-    //   } else {printf("error in start\n");}
-    //   service_state = disconnected;
-    //   printf("service: leaving\n");
-    // }
-    // else if (strcmp(splitted_buffer, "exit")==0
-    //   && service_state == disconnected) {
-    //   service_state = exiting;
-    //   printf("service: exiting\n");
-    // }
-    // else {
-    //   // invalid:
-    //   printf("service: invalid command\n");
-    // }
   }
 
   return 0;
