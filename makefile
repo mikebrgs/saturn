@@ -1,7 +1,7 @@
 all: reqserv service
 
 reqserv: src/reqserv.c
-	gcc src/reqserv.c -o build/reqserv
+	gcc -g src/reqserv.c -o build/reqserv
 
 service: src/service.c
-	gcc src/service.c -o build/service
+	gcc -g src/service.c -o build/service
