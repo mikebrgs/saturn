@@ -18,9 +18,9 @@ typedef int bool;
 
 typedef int state;
 // Service/Ring state
-#define disconnected 1  // Ring
-#define available 2  // Ring
-#define busy 3  // Ring
+#define disconnected 1  // &Ring
+#define available 2  // &Ring
+#define busy 3  // &Ring
 #define exiting 4
 
 // Function interaction
@@ -28,6 +28,8 @@ typedef int state;
 #define join 102
 #define error 103
 #define success 101
+#define pass 104;
+#define handle 105;
 
 // Client interaction
 #define start_service 201
@@ -35,7 +37,15 @@ typedef int state;
 #define invalid_service 203
 
 typedef int token;
-#define T 1
+#define S 301
+#define T 302
+#define I 303
+#define D 304
+#define N 305 // New server in the ring
+#define O 306 // Leaving the ring
+#define NS 307 // New start
+#define NW 308 // New server
+
 
 #define BUFFER_SIZE 128
 
@@ -48,8 +58,6 @@ typedef struct Server {
 
 typedef struct ServerNet {
   char id[BUFFER_SIZE];
-  // struct sockaddr_in udp;
-  // struct sockaddr_in tcp;
   char ip[16];
   char udp_port[16];
   char tcp_port[16];
@@ -67,6 +75,7 @@ state service_state = disconnected;
 state ring_state = disconnected;
 bool despatch_state = false;
 bool start_state = false;
+bool handling_new_server = false;
 
 int Max(int a, int b) {
   if (a > b) {
@@ -161,14 +170,11 @@ state SetStart(int *cs_fd,
   strcat(cs_buffer, service_net->tcp_port);
   printf("service: request: %s\n", cs_buffer);
   // Informing the central server
-  int n = sendto(*cs_fd,
-    cs_buffer,
-    sizeof(char)*strlen(cs_buffer),
-    0, (struct sockaddr*)cs_addr,
-    sizeof(*cs_addr));
-  if (n == -1) {
+  int n_send = sendto(*cs_fd, cs_buffer, sizeof(char)*strlen(cs_buffer),
+    0, (struct sockaddr*)cs_addr, sizeof(*cs_addr));
+  if (n_send == -1) {
     char error_buffer[1024];
-    memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    // memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
     perror(error_buffer);
     printf("service: sendto() error - %s\n", error_buffer);
     return error;
@@ -176,13 +182,14 @@ state SetStart(int *cs_fd,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  n = recvfrom(*cs_fd, cs_buffer, BUFFER_SIZE*sizeof(char),
+  int n_recv = recvfrom(*cs_fd, cs_buffer, BUFFER_SIZE*sizeof(char),
     0,(struct sockaddr*)cs_addr, &tmp);
-  if (n==-1) {
+  if (n_recv==-1) {
     char error_buffer[1024];
-    memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    // memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
     perror(error_buffer);
     printf("service: recvfrom() error - %s\n", error_buffer);
+    printf("%s\n", cs_buffer);
     return error;
   }
   printf("service: response: %s\n", cs_buffer);
@@ -269,82 +276,124 @@ state OpenServiceServer(ServerNet *service_net,
 
 state ConnectNewServer(ServerNet *service_net,
   Connection *listen_server,
-  Connection *prev_server,
-  Connection *next_server) {
-  int addrlen;
+  Connection *prev_server) {
+
+  int addrlen = sizeof(listen_server->addr);
   prev_server->fd = accept(listen_server->fd,
     (struct sockaddr*)&(listen_server->addr), &addrlen);
   if (prev_server->fd == -1) {
     return error;
   }
-  char request_buffer[BUFFER_SIZE];
-  memset((void*)&request_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  if (read(prev_server->fd, request_buffer, BUFFER_SIZE) == -1) {
-    return error;
-  }
-  printf("service: request: %s", request_buffer);
-  char *splitted_buffer = strtok(request_buffer, " ");
-  if (strcmp(splitted_buffer, "NEW") != 0) {
-    return error;
-  }
-  // Server ID
-  splitted_buffer = strtok(NULL, ";");
-  if (splitted_buffer == NULL) {
-    return error;
-  }
-  char new_server_id[BUFFER_SIZE];
-  memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  strcpy(new_server_id, splitted_buffer);
-  // Server IP
-  splitted_buffer = strtok(NULL, ";");
-  if (splitted_buffer == NULL) {
-    return error;
-  }
-  char new_server_ip[BUFFER_SIZE];
-  memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  strcpy(new_server_ip, splitted_buffer);
-  // Server Port
-  splitted_buffer = strtok(NULL, "\n");
-  if (splitted_buffer == NULL) {
-    return error;
-  }
-  char new_server_port[BUFFER_SIZE];
-  memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  strcpy(new_server_port, splitted_buffer);
+  // Move everything else to new function
+  // char request_buffer[BUFFER_SIZE];
+  // memset((void*)&request_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  // int request_read;
+  // char * request_pointer = &request_buffer[0];
+  // // printf("H1\n");
+  // while (1) {
+  //   request_read = read(prev_server->fd, request_pointer, BUFFER_SIZE);
+  //   if (request_read <= 0) {
+  //     return error;
+  //   }
+  //   request_pointer += request_read;
+  //   if (strchr(request_buffer, '\n') != NULL) {
+  //     break;
+  //   }
+  // }
+  // // printf("H2\n");
+  // // if (read(prev_server->fd, request_buffer, BUFFER_SIZE) == -1) {
+  // //   return error;
+  // // }
+  // printf("service: request: %s", request_buffer);
+  // char *splitted_buffer = strtok(request_buffer, " ");
+  // if (strcmp(splitted_buffer, "NEW") != 0) {
+  //   return error;
+  // }
+  // // Server ID
+  // splitted_buffer = strtok(NULL, ";");
+  // if (splitted_buffer == NULL) {
+  //   return error;
+  // }
+  // char new_server_id[BUFFER_SIZE];
+  // memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  // strcpy(new_server_id, splitted_buffer);
+  // // Server IP
+  // splitted_buffer = strtok(NULL, ";");
+  // if (splitted_buffer == NULL) {
+  //   return error;
+  // }
+  // char new_server_ip[BUFFER_SIZE];
+  // memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  // strcpy(new_server_ip, splitted_buffer);
+  // // Server Port
+  // splitted_buffer = strtok(NULL, "\n");
+  // if (splitted_buffer == NULL) {
+  //   return error;
+  // }
+  // char new_server_port[BUFFER_SIZE];
+  // memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  // strcpy(new_server_port, splitted_buffer);
 
-  // prev_server will listen to the connection with the new server.
-  prev_server->addr = listen_server->addr;
-  printf("HERE1\n");
-  if (next_server->fd == -1) {
-    next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (next_server->fd == -1) {
-      return error;
-    }
-    // next server uses recorded addr
-    memset((void*)&(next_server->addr), (int)'\0', sizeof(next_server->addr));
-    next_server->addr.sin_family = AF_INET;
-    if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
-      return error;
-    }
-    next_server->addr.sin_port = htons(atoi(new_server_port));
-    printf("HERE2\n");
-    if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
-      sizeof(next_server->addr)) == -1) {
-      return error;
-    }
-    printf("HERE3\n");
-  }
+  // // this server will connect to new server or pass a token.
+  // // printf("H3\n");
+  // prev_server->addr = listen_server->addr;
+  // if (next_server->fd == -1) {
+  //   next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
+  //   if (next_server->fd == -1) {
+  //     return error;
+  //   }
+  //   // next server uses recorded addr
+  //   memset((void*)&(next_server->addr), (int)'\0', sizeof(next_server->addr));
+  //   next_server->addr.sin_family = AF_INET;
+  //   if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
+  //     return error;
+  //   }
+  //   next_server->addr.sin_port = htons(atoi(new_server_port));
+  //   // printf("H4\n");
+  //   if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
+  //     sizeof(next_server->addr)) == -1) {
+  //     return error;
+  //   }
+  //   strcpy(service_net->next_server.id, new_server_id);
+  //   strcpy(service_net->next_server.ip, new_server_ip);
+  //   strcpy(service_net->next_server.port, new_server_port);
+  // } else {
+  //   char token_buffer[BUFFER_SIZE];
+  //   memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  //   strcpy(token_buffer, "TOKEN ");
+  //   strcat(token_buffer, service_net->id);
+  //   strcat(token_buffer, ";N;");
+  //   strcat(token_buffer, new_server_id);
+  //   strcat(token_buffer, ";");
+  //   strcat(token_buffer, new_server_ip);
+  //   strcat(token_buffer, ";");
+  //   strcat(token_buffer, new_server_port);
+  //   strcat(token_buffer, "\n");
+  //   int token_left = strlen(token_buffer) * sizeof(char);
+  //   int token_written;
+  //   char *token_pointer = &token_buffer[0];
+  //   while (token_left > 0) {
+  //     token_written = write(next_server->fd, token_pointer, token_left);
+  //     if (token_written <= 0) {
+  //       return error;
+  //     }
+  //     token_left -= token_written;
+  //     token_pointer += token_written;
+  //   }
+  // }
 
-  // Remove afterwards
-  close(prev_server->fd);
-  close(next_server->fd);
+  // printf("H5\n");
+
+  // // Remove afterwards
+  // close(prev_server->fd);
+  // close(next_server->fd);
   return success;
 }
 
-// Auxiliary functions
 state JoinRing(ServerNet * service_net,
   Connection *next_server,
-  Connection *prev_server) {
+  Connection *prev_server,
+  Connection *listen_server) {
   // Convert strings to net format and prepare address
   memset((void*)&(next_server->addr),
     (int)'\0', sizeof(next_server->addr));
@@ -354,8 +403,7 @@ state JoinRing(ServerNet * service_net,
   }
   next_server->addr.sin_port = htons(atoi(service_net->next_server.port));
   // Prepare connection
-  if (connect(next_server->fd,
-    (struct sockaddr*)&(next_server->addr),
+  if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
     sizeof(next_server->addr))==-1) {
     return error;
   }
@@ -386,40 +434,46 @@ state JoinRing(ServerNet * service_net,
     token_pointer += token_done;
   }
 
-  // Prepare listen address
-  memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  memset((void*)&(prev_server->addr),
-    (int)'\0', sizeof(prev_server->addr));
-  prev_server->addr.sin_family = AF_INET;
-  prev_server->addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  prev_server->addr.sin_port = htons(atoi(service_net->tcp_port));
-
-  if (bind(prev_server->fd,
-    (struct sockaddr*)&(prev_server->addr),
-    sizeof(prev_server->addr)) == -1) {
-    return error;
-  }
-  if (listen(prev_server->fd, 5) == -1) {
-    return error;
-  }
-  int addrlen, n, newfd;
-  addrlen = sizeof(prev_server->addr);
-  while (1) {
-    if ((newfd = accept(prev_server->fd,
-      (struct sockaddr*)&prev_server->addr,
+  // Connect to new prev server
+  int addrlen;
+  addrlen = sizeof(listen_server->addr);
+    if ((prev_server->fd = accept(listen_server->fd,
+      (struct sockaddr*)&listen_server->addr,
       &addrlen))==-1) {
       return error;
     }
-    while ((n=read(newfd, token_buffer, 128)) != 0) {
-      if (n == -1) {
-        return error;
-      }
+  prev_server->addr = listen_server->addr;
 
-    }
+  return success;
+}
+
+state LeaveRing(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
   }
-
-
-
+  char token_buffer[BUFFER_SIZE];
+  memset((void*)&(token_buffer), (int)'\0', sizeof(token_buffer));
+  strcpy(token_buffer, "TOKEN ");
+  strcat(token_buffer, service_net->id);
+  strcat(token_buffer, ";O;");
+  strcat(token_buffer, service_net->next_server.id);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, service_net->next_server.ip);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, service_net->next_server.port);
+  strcat(token_buffer, "\n");
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
   return success;
 }
 
@@ -437,23 +491,23 @@ state WithdrawDespatch(int *cs_fd,
   printf("service: request: %s\n", cs_buffer);
 
   // Informing the central server
-  int n = sendto(*cs_fd,
+  int n_send = sendto(*cs_fd,
     cs_buffer,
     sizeof(char)*strlen(cs_buffer),
     0, (struct sockaddr*)cs_addr,
     sizeof(*cs_addr));
-  if (n == -1) {
+  if (n_send == -1) {
     printf("service: sendto() error\n");
     return error;
   }
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  n=recvfrom(*cs_fd,
+  int n_recv=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
     0,(struct sockaddr*)cs_addr,&tmp);
-  if (n==-1) {
+  if (n_recv==-1) {
     printf("service: recvfrom() error\n");
     return error;
   }
@@ -484,12 +538,12 @@ state WithdrawStart(int *cs_fd,
   printf("service: request: %s\n", cs_buffer);
 
   // Informing the central server
-  int n = sendto(*cs_fd,
+  int n_send = sendto(*cs_fd,
     cs_buffer,
     sizeof(char)*strlen(cs_buffer),
     0, (struct sockaddr*)cs_addr,
     sizeof(*cs_addr));
-  if (n == -1) {
+  if (n_send == -1) {
     char error_buffer[1024];
     perror(error_buffer);
     printf("service: sendto() error - %s\n", error_buffer);
@@ -498,11 +552,11 @@ state WithdrawStart(int *cs_fd,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  n=recvfrom(*cs_fd,
+  int n_recv=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
     0,(struct sockaddr*)cs_addr,&tmp);
-  if (n==-1) {
+  if (n_recv==-1) {
     char error_buffer[1024];
     perror(error_buffer);
     printf("service: recvfrom() error - %s\n", error_buffer);
@@ -521,14 +575,593 @@ state WithdrawStart(int *cs_fd,
   return success;
 }
 
-state ClassifyToken() {
+state HandleToken(ServerNet *service_net,
+  Connection *prev_server,
+  char * token_buffer) {
+  memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  int token_read;
+  char * token_pointer = &token_buffer[0];
 
+  while (1) {
+    token_read = read(prev_server->fd, token_pointer, BUFFER_SIZE);
+    if (token_read <= 0) {
+      return error;
+    }
+    token_pointer += token_read;
+    if (strchr(token_buffer, '\n') != NULL) {
+      break;
+    }
+  }
+  printf("service: request: %s", token_buffer);
+  if (strcmp(token_buffer, "NEW_START\n")) {
+    return NS;
+  }
+  char *splitted_buffer = strtok(token_buffer, " ");
+  if (strcmp(splitted_buffer, "NEW") == 0) {
+    return NW;
+  } else if (strcmp(splitted_buffer, "TOKEN") != 0) {
+    return error;
+  }
+  // Server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char token_id[BUFFER_SIZE];
+  memset((void*)&token_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(token_id, splitted_buffer);
+  // Token type
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  if (strcmp(splitted_buffer, "S") == 0) {
+    return S;
+  } else if (strcmp(splitted_buffer, "T") == 0) {
+    return T;
+  } else if (strcmp(splitted_buffer, "I") == 0) {
+    return I;
+  } else if (strcmp(splitted_buffer, "D") == 0) {
+    return D;
+  } else if (strcmp(splitted_buffer, "N") == 0) {
+    return N;
+  } else if (strcmp(splitted_buffer, "O") == 0) {
+    return O;
+  }
   return error;
 }
 
-state SendMessage() {
+state HandleTokenS(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  if (service_state == available) {
+    // Assume as despatch in the case it's available
+    char *splitted_buffer = strtok(token_buffer, " ");
+    if (strcmp(splitted_buffer, "TOKEN") != 0) {
+      return error;
+    }
+    // Server ID
+    splitted_buffer = strtok(NULL, ";");
+    if (splitted_buffer == NULL) {
+      return error;
+    }
+    char token_id[BUFFER_SIZE];
+    memset((void*)&token_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_id, splitted_buffer);
+    // Token type
+    splitted_buffer = strtok(NULL, ";");
+    if (splitted_buffer == NULL) {
+      return error;
+    }
 
+    char new_token_buffer[BUFFER_SIZE];
+    memset((void*)&(new_token_buffer), (int)'\0', sizeof(new_token_buffer));
+    strcpy(new_token_buffer, "TOKEN ");
+    strcat(new_token_buffer, token_id);
+    strcat(new_token_buffer, ";T\n");
+    int token_left = strlen(new_token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &new_token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+    // return handle to set this as DS server
+    return handle;
+  } else if (service_state == busy) {
+    // Send same token to next server
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+    // return handle to do nothing
+    return pass;
+  }
   return error;
+}
+
+state HandleTokenT(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  // Send same token to next server
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
+  // return handle to do nothing
+  return success;
+}
+
+state HandleTokenI(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  // Send same token to next server
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
+  ring_state = busy;
+  // return handle to do nothing
+  return success;
+}
+
+state HandleTokenD(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  // Send same token to next server
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
+  // return handle to do nothing
+  ring_state = available;
+  return success;
+}
+
+state HandleTokenNW(ServerNet * service_net,
+  Connection * next_server,
+  char * request_buffer) {
+  int request_read;
+  char * request_pointer = &request_buffer[0];
+
+  printf("service: request: %s", request_buffer);
+  char *splitted_buffer = strtok(request_buffer, " ");
+  if (strcmp(splitted_buffer, "NEW") != 0) {
+    return error;
+  }
+  // Server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_id[BUFFER_SIZE];
+  memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_id, splitted_buffer);
+  // Server IP
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_ip[BUFFER_SIZE];
+  memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_ip, splitted_buffer);
+  // Server Port
+  splitted_buffer = strtok(NULL, "\n");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_port[BUFFER_SIZE];
+  memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_port, splitted_buffer);
+
+  if (next_server->fd == -1) {
+    next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (next_server->fd == -1) {
+      return error;
+    }
+    memset((void*)&(next_server->addr), (int)'\0', sizeof(next_server->addr));
+    next_server->addr.sin_family = AF_INET;
+    if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
+      return error;
+    }
+    next_server->addr.sin_port = htons(atoi(new_server_port));
+    // printf("H4\n");
+    if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
+      sizeof(next_server->addr)) == -1) {
+      return error;
+    }
+    return success;
+  }
+  return handle;
+}
+
+state HandleTokenN(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  char *splitted_buffer = strtok(token_buffer, " ");
+  if (strcmp(splitted_buffer, "TOKEN") != 0) {
+    return error;
+  }
+  // Server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char master_server_id[BUFFER_SIZE];
+  memset((void*)&master_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(master_server_id, splitted_buffer);
+  if (strcmp(service_net->next_server.id, master_server_id) != 0) {
+    // Send same token to next server
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+    return success;
+  }
+  // Token type
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char token_type[BUFFER_SIZE];
+  memset((void*)&token_type, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(token_type, splitted_buffer);
+  // New server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_id[BUFFER_SIZE];
+  memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_id, splitted_buffer);
+  // New server IP
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_ip[BUFFER_SIZE];
+  memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_ip, splitted_buffer);
+  // New server Port
+  splitted_buffer = strtok(NULL, "\n");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_port[BUFFER_SIZE];
+  memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_port, splitted_buffer);
+
+  close(next_server->fd);
+  next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
+  next_server->addr.sin_family = AF_INET;
+  if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
+    return error;
+  }
+  next_server->addr.sin_port = htons(atoi(new_server_port));
+
+  if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
+    sizeof(next_server->addr)) == -1) {
+    return error;
+  }
+
+  strcpy(service_net->next_server.id, new_server_id);
+  strcpy(service_net->next_server.ip, new_server_ip);
+  strcpy(service_net->next_server.port, new_server_port);
+
+  return success;
+}
+
+state HandleTokenO(ServerNet * service_net,
+  Connection * prev_server,
+  Connection * next_server,
+  char * token_buffer) {
+  char *splitted_buffer = strtok(token_buffer, " ");
+  if (strcmp(splitted_buffer, "TOKEN") != 0) {
+    return error;
+  }
+  // Server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char leaving_server_id[BUFFER_SIZE];
+  memset((void*)&leaving_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(leaving_server_id, splitted_buffer);
+  if (strcmp(service_net->next_server.id, leaving_server_id) != 0) {
+    // Send same token to next server
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+    return success;
+  }
+  // Token type
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char token_type[BUFFER_SIZE];
+  memset((void*)&token_type, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(token_type, splitted_buffer);
+  // New next server ID
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_id[BUFFER_SIZE];
+  memset((void*)&new_server_id, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_id, splitted_buffer);
+  if (strcmp(service_net->id, new_server_id) == 0) {
+    close(next_server->fd);
+    next_server->fd = -1;
+    close(prev_server->fd);
+    prev_server->fd = -1;
+    return success;
+  }
+  // New next server IP
+  splitted_buffer = strtok(NULL, ";");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_ip[BUFFER_SIZE];
+  memset((void*)&new_server_ip, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_ip, splitted_buffer);
+  // New next server Port
+  splitted_buffer = strtok(NULL, "\n");
+  if (splitted_buffer == NULL) {
+    return error;
+  }
+  char new_server_port[BUFFER_SIZE];
+  memset((void*)&new_server_port, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(new_server_port, splitted_buffer);
+
+  close(next_server->fd);
+  next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
+  next_server->addr.sin_family = AF_INET;
+  if (inet_aton(new_server_ip, &(next_server->addr.sin_addr)) == 0) {
+    return error;
+  }
+  next_server->addr.sin_port = htons(atoi(new_server_port));
+
+  if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
+    sizeof(next_server->addr)) == -1) {
+    return error;
+  }
+  return success;
+}
+
+state HandleTokenNS(ServerNet * service_net,
+  Connection * next_server,
+  char * token_buffer) {
+  return handle;
+}
+
+state SendTokenS(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
+  } else {
+    char token_buffer[BUFFER_SIZE];
+    memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_buffer, "TOKEN ");
+    strcat(token_buffer, service_net->id);
+    strcat(token_buffer, ";S\n");
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+  }
+  return success;
+}
+
+state SendTokenI(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
+  } else {
+    char token_buffer[BUFFER_SIZE];
+    memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_buffer, "TOKEN ");
+    strcat(token_buffer, service_net->id);
+    strcat(token_buffer, ";I\n");
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+  }
+  return success;
+}
+
+state SendTokenD(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
+  } else {
+    char token_buffer[BUFFER_SIZE];
+    memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_buffer, "TOKEN ");
+    strcat(token_buffer, service_net->id);
+    strcat(token_buffer, ";D\n");
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+  }
+  return success;
+}
+
+state SendTokenNW(ServerNet * service_net,
+  Connection * next_server) {
+  char token_buffer[BUFFER_SIZE];
+  memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(token_buffer, "NEW ");
+  strcat(token_buffer, service_net->id);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, service_net->ip);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, service_net->tcp_port);
+  strcat(token_buffer, "\n");
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
+  return success;
+}
+
+state SendTokenN(ServerNet * service_net,
+  Connection * next_server,
+  Server * new_server) {
+  char token_buffer[BUFFER_SIZE];
+  memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  strcpy(token_buffer, "TOKEN ");
+  strcat(token_buffer, service_net->id);
+  strcat(token_buffer, ";N;");
+  strcat(token_buffer, new_server->id);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, new_server->ip);
+  strcat(token_buffer, ";");
+  strcat(token_buffer, new_server->port);
+  strcat(token_buffer, "\n");
+  int token_left = strlen(token_buffer) * sizeof(char);
+  int token_written;
+  char *token_pointer = &token_buffer[0];
+  while (token_left > 0) {
+    token_written = write(next_server->fd, token_pointer, token_left);
+    if (token_written <= 0) {
+      return error;
+    }
+    token_left -= token_written;
+    token_pointer += token_written;
+  }
+  return success;
+}
+
+state SendTokenO(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
+  } else {
+    char token_buffer[BUFFER_SIZE];
+    memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_buffer, "TOKEN ");
+    strcat(token_buffer, service_net->id);
+    strcat(token_buffer, ";O;");
+    strcat(token_buffer, service_net->next_server.id);
+    strcat(token_buffer, ";");
+    strcat(token_buffer, service_net->next_server.ip);
+    strcat(token_buffer, ";");
+    strcat(token_buffer, service_net->next_server.port);
+    strcat(token_buffer, "\n");
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+  }
+  return success;
+}
+
+state SendTokenNS(ServerNet * service_net,
+  Connection * next_server) {
+  if (next_server->fd == -1) {
+    return success;
+  } else {
+    char token_buffer[BUFFER_SIZE];
+    memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+    strcpy(token_buffer, "NEW_START\n");
+    int token_left = strlen(token_buffer) * sizeof(char);
+    int token_written;
+    char *token_pointer = &token_buffer[0];
+    while (token_left > 0) {
+      token_written = write(next_server->fd, token_pointer, token_left);
+      if (token_written <= 0) {
+        return error;
+      }
+      token_left -= token_written;
+      token_pointer += token_written;
+    }
+  }
+  return success;
 }
 
 state OpenClientServer(ServerNet *service_net,
@@ -637,6 +1270,10 @@ int main(int argc, char const *argv[])
   cs_addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
   cs_addr.sin_port = htons(59000);
 
+  Connection central_server;
+  central_server.fd = cs_fd;
+  central_server.addr = cs_addr;
+
   // Evaluate arguments
   bool csip_acquired = false;
   bool cspt_acquired = false;
@@ -711,7 +1348,8 @@ int main(int argc, char const *argv[])
   }
 
   // Parameters necessary fo running the program
-  char kb_buffer[128];
+  char kb_buffer[BUFFER_SIZE];
+  char token_buffer[BUFFER_SIZE];
   int max_fd = -1;
   // Start listening to the TCP port
   OpenServiceServer(&service_net, &listen_server);
@@ -730,6 +1368,11 @@ int main(int argc, char const *argv[])
       service_state == busy) {
       FD_SET(client.fd, &rfds);
       max_fd = Max(max_fd, client.fd);
+    }
+    // If it has a server connected
+    if (prev_server.fd != -1) {
+      FD_SET(prev_server.fd, &rfds);
+      max_fd = Max(max_fd, prev_server.fd);
     }
 
     // Block until some action happens
@@ -769,13 +1412,14 @@ int main(int argc, char const *argv[])
             }
             break;
           case join :
-            // if (JoinRing(&service_net, &next_server, &prev_server) == success) {
+            // if (JoinRing(&service_net, &next_server, &prev_server,
+            //   &listen_server) == success) {
             //   printf("service: join success\n");
             //   service_state = available;
+            //   ring_state = available;
             // } else {
             //   printf("service: join error\n");
             // }
-              printf("service: join -- not implemented\n");
             break;
           default :
             goto invalid;
@@ -800,6 +1444,9 @@ int main(int argc, char const *argv[])
         printf("Successor...\n");
       } else if (strcmp(splitted_buffer, "leave")==0
         && service_state == available) {
+        if (LeaveRing(&service_net, &next_server) != success) {
+          printf("service: error leaving ring\n");
+        }
         if (despatch_state == true) {
           if (WithdrawDespatch(&cs_fd, &service_net, &cs_addr) != success) {
             printf("service: error leaving despatch\n");
@@ -831,9 +1478,9 @@ int main(int argc, char const *argv[])
 
     // Socket action - new server contacting
     if (FD_ISSET(listen_server.fd, &rfds)) {
-      switch(ConnectNewServer(&service_net, &listen_server,
-        &prev_server, &next_server)) {
+      switch(ConnectNewServer(&service_net, &listen_server, &prev_server)) {
         case success :
+          handling_new_server = true;
           printf("service: server connected\n");
           break;
         default :
@@ -842,7 +1489,11 @@ int main(int argc, char const *argv[])
       }
     }
     // Socket action - previous
-
+    if (FD_ISSET(prev_server.fd, &rfds)) {
+      switch(HandleToken(&service_net, &prev_server)) {
+        case 
+      }
+    }
     // Socket action - next
 
     if (FD_ISSET(client.fd, &rfds)) {
