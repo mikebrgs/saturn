@@ -117,7 +117,7 @@ state GetStart(int *cs_fd,
   n=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,&tmp);
+    0,(struct sockaddr*)cs_addr, (socklen_t*)&tmp);
   if (n==-1) {
     char error_buffer[1024];
     perror(error_buffer);
@@ -188,7 +188,7 @@ state SetStart(int *cs_fd,
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
   int n_recv = recvfrom(*cs_fd, cs_buffer, BUFFER_SIZE*sizeof(char),
-    0,(struct sockaddr*)cs_addr, &tmp);
+    0,(struct sockaddr*)cs_addr, (socklen_t*)&tmp);
   if (n_recv==-1) {
     char error_buffer[1024];
     // memset((void*)&error_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
@@ -243,7 +243,7 @@ state SetDespatch(int *cs_fd,
   n=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,&tmp);
+    0,(struct sockaddr*)cs_addr, (socklen_t*)&tmp);
   if (n==-1) {
     char error_buffer[1024];
     perror(error_buffer);
@@ -285,7 +285,7 @@ state AcceptServer(ServerNet *service_net,
 
   int addrlen = sizeof(listen_server->addr);
   prev_server->fd = accept(listen_server->fd,
-    (struct sockaddr*)&(listen_server->addr), &addrlen);
+    (struct sockaddr*)&(listen_server->addr), (socklen_t*)&addrlen);
   if (prev_server->fd == -1) {
     return error;
   }
@@ -387,8 +387,7 @@ state AcceptRing (ServerNet * service_net,
   int addrlen;
   addrlen = sizeof(listen_server->addr);
     if ((prev_server->fd = accept(listen_server->fd,
-      (struct sockaddr*)&listen_server->addr,
-      &addrlen))==-1) {
+      (struct sockaddr*)&listen_server->addr, (socklen_t*)&addrlen))==-1) {
       return error;
     }
   prev_server->addr = listen_server->addr;
@@ -451,10 +450,8 @@ state WithdrawDespatch(int *cs_fd,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  int n_recv=recvfrom(*cs_fd,
-    cs_buffer,
-    BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,&tmp);
+  int n_recv=recvfrom(*cs_fd, cs_buffer, BUFFER_SIZE,
+    0,(struct sockaddr*)cs_addr, (socklen_t*)&tmp);
   if (n_recv==-1) {
     printf("service: recvfrom() error\n");
     return error;
@@ -503,7 +500,7 @@ state WithdrawStart(int *cs_fd,
   int n_recv=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,&tmp);
+    0,(struct sockaddr*)cs_addr, (socklen_t*)&tmp);
   if (n_recv==-1) {
     char error_buffer[1024];
     perror(error_buffer);
@@ -1156,13 +1153,13 @@ state OpenClientServer(ServerNet *service_net,
 }
 
 state InteractClient(Connection *client) {
-  int addrlen = sizeof(client->addr);
+  int tmp = sizeof(client->addr);
   char client_buffer[BUFFER_SIZE];
   memset((void*)&(client_buffer), (int)'\0', sizeof(char)*BUFFER_SIZE);
   if (recvfrom(client->fd,
     client_buffer,
     BUFFER_SIZE*sizeof(char), 0,
-    (struct sockaddr*)&(client->addr), &addrlen) == -1) {
+    (struct sockaddr*)&(client->addr), (socklen_t*)&tmp) == -1) {
     return error;
   }
   printf("service: request: %s\n", client_buffer);
@@ -1173,7 +1170,7 @@ state InteractClient(Connection *client) {
     printf("service: response: %s\n", client_buffer);
     if (sendto(client->fd, client_buffer,
       sizeof(char)*strlen(client_buffer),
-      0, (struct sockaddr*)&(client->addr), addrlen) == -1) {
+      0, (struct sockaddr*)&(client->addr), tmp) == -1) {
       return error;
     }
     return start_service;
@@ -1184,7 +1181,7 @@ state InteractClient(Connection *client) {
     printf("service: response: %s\n", client_buffer);
     if (sendto(client->fd, client_buffer,
       sizeof(char)*strlen(client_buffer),
-      0, (struct sockaddr*)&(client->addr), addrlen) == -1) {
+      0, (struct sockaddr*)&(client->addr), tmp) == -1) {
       return error;
     }
     return terminate_service;
