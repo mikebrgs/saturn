@@ -64,7 +64,7 @@ state GetDespatch(int *cs_fd,
   n=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)&cs_addr,&tmp);
+    0,(struct sockaddr*)&cs_addr,(socklen_t*)&tmp);
   if (n==-1) {
     char error_buffer[1024];
     perror(error_buffer);
@@ -89,6 +89,7 @@ state GetDespatch(int *cs_fd,
     return error;
   }
   strcpy(server->port, splitted_buffer_recv);
+  return success;
 }
 
 state StartService(Server * server_data,
@@ -120,7 +121,7 @@ state StartService(Server * server_data,
   int addrlen;
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
-    (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
+    (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
     printf("4\n");
     return error;
   }
@@ -147,7 +148,7 @@ state EndService(Server * server_data,
   int addrlen;
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
-    (struct sockaddr*)&(server_connection->addr), &addrlen) == -1) {
+    (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
     return error;
   }
   if (strcmp(server_buffer, "YOUR_SERVICE OFF") != 0) {
