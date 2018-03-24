@@ -34,6 +34,7 @@ typedef int state;
 #define pass 104
 #define handle 105
 #define closecom 106
+#define ignore 107
 
 // Client interaction
 #define start_service 201
@@ -424,7 +425,9 @@ state WithdrawDespatch(ServerNet * service_net,
   Connection * central_server) {
   char cs_buffer[128];
   int tmp;
-
+  if (despatch_state == false) {
+    return success;
+  }
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
   strcpy(cs_buffer, "WITHDRAW_DS ");
   strcat(cs_buffer, service_net->service_id);
@@ -628,7 +631,7 @@ state HandleTokenD(ServerNet * service_net,
   String * token_buffer) {
   Server server;
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE];
-  printf("service.HandleTokenS: %s\n", token_buffer->string);
+  printf("service.HandleTokenD: %s\n", token_buffer->string);
   if (sscanf(token_buffer->string, "%s %[^;];%[^;]\n", token_tmp,
     type_tmp, server.id) != 3) {
     return error;
@@ -637,9 +640,12 @@ state HandleTokenD(ServerNet * service_net,
     || strcmp(type_tmp, "D") != 0) {
     return error;
   }
-  if (strcmp(server.id, service_net->id) == 0
-    && BiggerID(service_net, &server)) {
+  ring_state = available;
+  if (strcmp(server.id, service_net->id) == 0) {
     return handle;
+  } else if (service_state == joinning
+    && BiggerID(service_net, &server)) {
+    return ignore;
   }
   return pass;
 }
@@ -697,6 +703,7 @@ state HandleTokenO(ServerNet * service_net,
 }
 
 state HandleTokenNS() {
+
   return handle;
 }
 
@@ -774,14 +781,13 @@ state SendTokenI(ServerNet * service_net,
 }
 
 state SendTokenD(ServerNet * service_net,
-  Connection * next_server,
-  Server * server) {
+  Connection * next_server) {
   if (next_server->fd == -1) {
-    return success;
+    return error;
   } else {
     char token_buffer[BUFFER_SIZE];
     memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-    sprintf(token_buffer, "TOKEN %s;D\n", server->id);
+    sprintf(token_buffer, "TOKEN %s;D\n", service_net->id);
     printf("service.SendTokenD: %s\n", token_buffer);
     int token_left = strlen(token_buffer) * sizeof(char);
     int token_written;
@@ -967,7 +973,7 @@ state OpenClientServer(ServerNet *service_net,
   return success;
 }
 
-state InteractClient(Connection *client) {
+state HandleClient(Connection *client) {
   int tmp = sizeof(client->addr);
   char client_buffer[BUFFER_SIZE];
   memset((void*)&(client_buffer), (int)'\0', sizeof(char)*BUFFER_SIZE);
@@ -1045,8 +1051,8 @@ int main(int argc, char const *argv[])
     return -1;
   }
   // Uncomment in the end
-  // central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
-  // central_server.addr.sin_port = htons(59000);
+  central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
+  central_server.addr.sin_port = htons(59000);
 
   // Evaluate arguments
   bool csip_acquired = false;
@@ -1122,16 +1128,16 @@ int main(int argc, char const *argv[])
   }
 
 
-// 
-// 
-  // Erase afterwards
-  if (inet_aton(service_net.ip, &(central_server.addr.sin_addr)) == 0) {
-    printf("service: not able to connect to central server\n");
-    return -1;
-  }
-  central_server.addr.sin_port = htons(56000);
-// 
-// 
+// // 
+// // 
+//   // Erase afterwards
+//   if (inet_aton(service_net.ip, &(central_server.addr.sin_addr)) == 0) {
+//     printf("service: not able to connect to central server\n");
+//     return -1;
+//   }
+//   central_server.addr.sin_port = htons(56000);
+// // 
+// // 
 
   // Parameters necessary fo running the program
   char kb_buffer[BUFFER_SIZE];
@@ -1363,8 +1369,21 @@ int main(int argc, char const *argv[])
           }
           break;
         case D :
-          
-          printf("D\n");
+          tmp_state = HandleTokenD(&service_net, &token);
+          if (tmp_state == pass) {
+            if (PassToken(&next_server, &token) != success) {
+              goto error_tokenD;
+            }
+          } else if (tmp_state == ignore) {
+            // Do nothing
+          } else if (tmp_state == handle) {
+            if (SetDespatch(&service_net, &central_server) != success) {
+              goto error_tokenD;
+            }
+          } else {
+            error_tokenD:
+            printf("service: error handling tokenD\n");
+          }
           break;
         case NW :
           tmp_state = HandleTokenNW(&service_net, &next_server, &token);
@@ -1449,15 +1468,33 @@ int main(int argc, char const *argv[])
     // Socket action - next
 
     if (FD_ISSET(client.fd, &rfds)) {
-      switch (InteractClient(&client)) {
+      switch (HandleClient(&client)) {
         case start_service :
           service_state = busy;
+          if (despatch_state == true && next_server.fd == -1
+            && WithdrawDespatch(&service_net, &central_server) != success) {
+          } else if (despatch_state == true
+            && SendTokenS(&service_net, &next_server) != success) {
+            goto error_client;
+          } else {
+            // Do nothing
+          }
           break;
         case terminate_service :
           service_state = available;
+          if (ring_state == busy && next_server.fd == -1
+            && SetDespatch(&service_net, &central_server) != success) {
+            goto error_client;
+          } else if (ring_state == busy
+            && SendTokenD(&service_net, &next_server) != success) {
+            goto error_client;
+          } else {
+            // Do nothing
+          }
           break;
-        case invalid_service :
         default :
+          error_client:
+          printf("service: error handling client\n");
           break;
       }
     }
