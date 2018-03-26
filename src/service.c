@@ -35,6 +35,7 @@ typedef int state;
 #define handle 105
 #define closecom 106
 #define ignore 107
+#define closeservercom 108
 
 // Client interaction
 #define start_service 201
@@ -84,7 +85,6 @@ state service_state = disconnected;
 state ring_state = disconnected;
 bool despatch_state = false;
 bool start_state = false;
-bool handling_new_server = false;
 bool waiting_to_leave = false;
 
 int Max(int a, int b) {
@@ -103,7 +103,7 @@ bool BiggerID(ServerNet * service_net,
 
 state GetStart(ServerNet * service_net,
   Connection * central_server) {
-  char cs_buffer[128];
+  char cs_buffer[BUFFER_SIZE];
   int tmp;
 
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
@@ -111,11 +111,13 @@ state GetStart(ServerNet * service_net,
   strcat(cs_buffer, service_net->service_id);
   strcat(cs_buffer, ";");
   strcat(cs_buffer, service_net->id);
-  printf("service: request: %s\n", cs_buffer);
+  printf("service.GetStart.request: %s\n", cs_buffer);
   // Enquiring the central server
   int n = sendto(central_server->fd, cs_buffer, sizeof(char)*strlen(cs_buffer),
     0, (struct sockaddr*)&(central_server->addr), sizeof(central_server->addr));
   if (n == -1) {
+    char error_buffer[BUFFER_SIZE];
+    perror(error_buffer);
     printf("service: sendto() error\n");
     return error;
   }
@@ -127,13 +129,13 @@ state GetStart(ServerNet * service_net,
     BUFFER_SIZE,
     0,(struct sockaddr*)&(central_server->addr), (socklen_t*)&tmp);
   if (n==-1) {
-    char error_buffer[1024];
+    char error_buffer[BUFFER_SIZE];
     perror(error_buffer);
     printf("service: recvfrom() error - %s\n", error_buffer);
     return error;
   }
   // printf("RECV\n");
-  printf("service: response: %s\n", cs_buffer);
+  printf("service.GetStart.response: %s\n", cs_buffer);
   // Check if there was an error
   char join_response[BUFFER_SIZE];
   memset((void*)&join_response, (int)'\0', sizeof(char)*BUFFER_SIZE);
@@ -180,7 +182,7 @@ state SetStart(ServerNet * service_net,
   strcat(cs_buffer, service_net->ip);
   strcat(cs_buffer, ";");
   strcat(cs_buffer, service_net->tcp_port);
-  printf("service: request: %s\n", cs_buffer);
+  printf("service.SetStart.request: %s\n", cs_buffer);
   // Informing the central server
   int n_send = sendto(central_server->fd, cs_buffer, sizeof(char)*strlen(cs_buffer),
     0, (struct sockaddr*)&(central_server->addr), sizeof(central_server->addr));
@@ -204,7 +206,7 @@ state SetStart(ServerNet * service_net,
     printf("%s\n", cs_buffer);
     return error;
   }
-  printf("service: response: %s\n", cs_buffer);
+  printf("service.SetStart.response: %s\n", cs_buffer);
   char join_response[BUFFER_SIZE];
   memset((void*)&join_response, (int)'\0', sizeof(char)*BUFFER_SIZE);
   strcpy(join_response, "OK ");
@@ -325,6 +327,8 @@ state ConnectServer(ServerNet * service_net,
     return error;
   }
   strcpy(service_net->next_server.id, new_server->id);
+  strcpy(service_net->next_server.ip, new_server->ip);
+  strcpy(service_net->next_server.port, new_server->port);
   return success;
 }
 
@@ -366,6 +370,7 @@ state ConnectRing(ServerNet * service_net,
   Connection *listen_server) {
   next_server->fd = socket(AF_INET, SOCK_STREAM, 0);
   // Convert strings to net format and prepare address
+  printf("service.ConnectRing\n");
   memset((void*)&(next_server->addr),
     (int)'\0', sizeof(next_server->addr));
   next_server->addr.sin_family = AF_INET;
@@ -376,7 +381,6 @@ state ConnectRing(ServerNet * service_net,
     return error;
   }
   next_server->addr.sin_port = htons(atoi(service_net->next_server.port));
-  printf("%s - %s\n", service_net->next_server.ip, service_net->next_server.port);
   // Prepare connection
   if (connect(next_server->fd, (struct sockaddr*)&(next_server->addr),
     sizeof(next_server->addr))==-1) {
@@ -393,6 +397,7 @@ state AcceptRing (ServerNet * service_net,
   Connection * prev_server) {
   // Connect to new prev server
   int addrlen;
+  printf("service.AcceptRing\n");
   addrlen = sizeof(listen_server->addr);
     if ((prev_server->fd = accept(listen_server->fd,
       (struct sockaddr*)&listen_server->addr, (socklen_t*)&addrlen))==-1) {
@@ -418,6 +423,19 @@ state CloseConnections(Connection * prev_server,
     close(client->fd);
   }
   client->fd = -1;
+  return success;
+}
+
+state CloseServers(Connection * prev_server,
+  Connection * next_server) {
+  if (prev_server->fd != -1) {
+    close(prev_server->fd);
+    prev_server->fd = -1;
+  }
+  if (next_server->fd != -1) {
+    close(next_server->fd);
+    next_server->fd = -1;
+  }
   return success;
 }
 
@@ -574,7 +592,7 @@ state HandleTokenS(ServerNet * service_net,
   Server * server) {
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE];
   printf("service.HandleTokenS: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^\n]\n", token_tmp,
     type_tmp, server->id) != 3) {
     return error;
   }
@@ -594,7 +612,7 @@ state HandleTokenT(ServerNet * service_net,
   String * token_buffer) {
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], sender_tmp[BUFFER_SIZE];
   printf("service.HandleTokenT: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^\n]\n", token_tmp,
     type_tmp, sender_tmp) != 3) {
     return error;
   }
@@ -612,7 +630,7 @@ state HandleTokenI(ServerNet * service_net,
   String * token_buffer) {
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], sender_tmp[BUFFER_SIZE];
   printf("service.HandleTokenI: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^\n]\n", token_tmp,
     type_tmp, sender_tmp) != 3) {
     return error;
   }
@@ -632,7 +650,7 @@ state HandleTokenD(ServerNet * service_net,
   Server server;
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE];
   printf("service.HandleTokenD: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^\n]\n", token_tmp,
     type_tmp, server.id) != 3) {
     return error;
   }
@@ -666,7 +684,7 @@ state HandleTokenN(ServerNet * service_net,
   Server new_server;
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], master_tmp[BUFFER_SIZE];
   printf("service.HandleTokenN: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^\n]\n", token_tmp,
     master_tmp, type_tmp, new_server.id, new_server.ip, new_server.port) != 6) {
     return error;
   }
@@ -686,7 +704,7 @@ state HandleTokenO(ServerNet * service_net,
   Server new_server;
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], leaver[BUFFER_SIZE];
   printf("service.HandleTokenO: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^\n]\n", token_tmp,
     leaver, type_tmp, new_server.id, new_server.ip, new_server.port) != 6) {
     return error;
   }
@@ -697,7 +715,11 @@ state HandleTokenO(ServerNet * service_net,
   if (strcmp(leaver, service_net->id) == 0) {
     return closecom;
   } else if (strcmp(leaver, service_net->next_server.id) == 0) {
-    return handle;
+    if (strcmp(service_net->id, new_server.id) == 0) {
+      return closeservercom;
+    } else {
+      return handle;
+    }
   }
   return pass;
 }
@@ -808,13 +830,9 @@ state SendTokenNW(ServerNet * service_net,
   Connection * next_server) {
   char token_buffer[BUFFER_SIZE];
   memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  strcpy(token_buffer, "NEW ");
-  strcat(token_buffer, service_net->id);
-  strcat(token_buffer, ";");
-  strcat(token_buffer, service_net->ip);
-  strcat(token_buffer, ";");
-  strcat(token_buffer, service_net->tcp_port);
-  strcat(token_buffer, "\n");
+  sprintf(token_buffer, "NEW %s;%s;%s\n", service_net->id, service_net->ip,
+    service_net->tcp_port);
+  printf("service.SendTokenNW: %s\n", token_buffer);
   int token_left = strlen(token_buffer) * sizeof(char);
   int token_written;
   char *token_pointer = &token_buffer[0];
@@ -835,7 +853,7 @@ state SendTokenN(ServerNet * service_net,
 
   char token_buffer[BUFFER_SIZE];
   memset((void*)&token_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
-  sprintf(token_buffer, "TOKEN %s;N;%s;%s;%s", service_net->id, server->id,
+  sprintf(token_buffer, "TOKEN %s;N;%s;%s;%s\n", service_net->id, server->id,
     server->ip, server->port);
   printf("service.SendTokenN: %s\n", token_buffer);
   int token_left = strlen(token_buffer) * sizeof(char);
@@ -938,7 +956,7 @@ state ConvertTokenN(String * token_buffer,
   Server * server) {
   printf("service.ConvertTokenN: %s\n", token_buffer->string);
   char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], leaver_tmp[BUFFER_SIZE];
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;];%[^;];%[^\n]\n", token_tmp,
     leaver_tmp, type_tmp, server->id, server->ip, server->port) != 6) {
     return error;
   }
@@ -949,7 +967,7 @@ state ConvertTokenNW(String * token_buffer,
   Server * server) {
   char token_tmp[BUFFER_SIZE];
   printf("service.ConvertTokenNW: %s\n", token_buffer->string);
-  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^;]\n", token_tmp,
+  if (sscanf(token_buffer->string, "%s %[^;];%[^;];%[^\n]\n", token_tmp,
     server->id,  server->ip, server->port) != 4) {
     return error;
   }
@@ -968,6 +986,9 @@ state OpenClientServer(ServerNet *service_net,
   client->addr.sin_addr.s_addr = htonl(INADDR_ANY);
   client->addr.sin_port = htons(atoi(service_net->udp_port));
   if (bind(client->fd, (struct sockaddr*)&(client->addr), sizeof(client->addr)) == -1) {
+    char error_buffer[BUFFER_SIZE];
+    perror(error_buffer);
+    printf("service.OpenClientServer: error binding\n");
     return error;
   }
   return success;
@@ -1035,26 +1056,13 @@ int main(int argc, char const *argv[])
     exit(1);
   }
 
-  Connection next_server;
+  Connection next_server, prev_server, client;
   next_server.fd = -1;
-
-  Connection prev_server;
   prev_server.fd = -1;
-
-  Connection client;
-
-  // Preparing standard options
-  struct hostent *h;
-  h = gethostbyname("tejo.tecnico.ulisboa.pt");
-  if (h==NULL){
-    printf("service: not able to connect to tejo\n");
-    return -1;
-  }
-  // Uncomment in the end
-  central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
-  central_server.addr.sin_port = htons(59000);
+  client.fd = -1;
 
   // Evaluate arguments
+  struct hostent *h;
   bool csip_acquired = false;
   bool cspt_acquired = false;
   bool id_acquired = false;
@@ -1127,17 +1135,17 @@ int main(int argc, char const *argv[])
     return 1;
   }
 
-
-// // 
-// // 
-//   // Erase afterwards
-//   if (inet_aton(service_net.ip, &(central_server.addr.sin_addr)) == 0) {
-//     printf("service: not able to connect to central server\n");
-//     return -1;
-//   }
-//   central_server.addr.sin_port = htons(56000);
-// // 
-// // 
+  if (csip_acquired == false) {
+    h = gethostbyname("tejo.tecnico.ulisboa.pt");
+    if (h==NULL){
+      printf("service: not able to connect to tejo\n");
+      return -1;
+    }
+    central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
+  }
+  if (cspt_acquired == false) {
+    central_server.addr.sin_port = htons(59000);
+  }
 
   // Parameters necessary fo running the program
   char kb_buffer[BUFFER_SIZE];
@@ -1201,41 +1209,53 @@ int main(int argc, char const *argv[])
               start_state = true;
               despatch_state = true;
             } else {
-              printf("service: start error\n");
+              goto join_error;
             }
             break;
           case join :
             if (ConnectRing(&service_net, &next_server,
                 &listen_server) == success
               && SendTokenNW(&service_net, &next_server) == success
-              && AcceptRing(&service_net, &listen_server,
-                &prev_server) == success) {
+              && AcceptRing(&service_net, &listen_server, &prev_server) == success
+              && OpenClientServer(&service_net, &client) == success) {
               printf("service: join success\n");
               service_state = available;
               ring_state = available;
             } else {
-              printf("service: join error\n");
+              goto join_error;
             }
             break;
           default :
-            goto invalid;
+            join_error:
+            printf("service: error joining service\n");
+            break;
         }
       } else if (strcmp(splitted_buffer, "show_state")==0) {
         printf("service: ");
         // Self info
-        switch(service_state){
+        switch (service_state){
           case disconnected :
-            printf("Disconnected ");
+            printf("Disconnected - ");
             break;
           case available :
-            printf("Connected & Available ");
+            printf("Connected & Available - ");
             break;
           case busy :
-            printf("Connected & Busy ");
+            printf("Connected & Busy - ");
             break;
         }
         // Ring info
-        printf("Ring... ");
+        switch (ring_state) {
+          case available :
+            printf("Ring Available - ");
+            break;
+          case busy :
+            printf("Ring Busy - ");
+            break;
+          case disconnected :
+            printf("Not connected to Ring - ");
+            break;
+        }
         // Successor info
         if (next_server.fd == -1) {
           printf("NextServer: Empty\n");
@@ -1251,7 +1271,11 @@ int main(int argc, char const *argv[])
           if (WithdrawDespatch(&service_net, &central_server) != success) {
             goto invalid;
           }
+          if (CloseConnections(&prev_server, &next_server, &client) != success) {
+            goto invalid;
+          }
           service_state = disconnected;
+          ring_state = disconnected;
           printf("service: disconnected\n");
         } else {
           if (start_state == true) {
@@ -1293,11 +1317,11 @@ int main(int argc, char const *argv[])
     }
 
     // Socket action - new server contacting
-    if (FD_ISSET(listen_server.fd, &rfds)) {
+    if (listen_server.fd != -1
+      && FD_ISSET(listen_server.fd, &rfds)) {
       printf("service: accepting new server\n");
       switch(AcceptServer(&service_net, &listen_server, &prev_server)) {
         case success :
-          handling_new_server = true;
           printf("service: server connected\n");
           break;
         default :
@@ -1306,10 +1330,11 @@ int main(int argc, char const *argv[])
       }
     }
     // Socket action - previous
-    if (FD_ISSET(prev_server.fd, &rfds)) {
+    if (prev_server.fd != -1
+      && FD_ISSET(prev_server.fd, &rfds)) {
       String token;
       Server new_server;
-      printf("service: token detected\n");
+      // printf("service: token detected\n");
       switch(HandleToken(&service_net, &prev_server, &token)) {
         case S :
           tmp_state = HandleTokenS(&service_net, &token, &new_server);
@@ -1432,6 +1457,7 @@ int main(int argc, char const *argv[])
               goto error_tokenO;
             }
             service_state = disconnected;
+            ring_state = disconnected;
           }else if (tmp_state == handle) {
             // This server connects to new server
             if (PassToken(&next_server, &token) != success) {
@@ -1441,6 +1467,13 @@ int main(int argc, char const *argv[])
               goto error_tokenO;
             }
             if (ConnectServer(&service_net, &next_server, &new_server) != success) {
+              goto error_tokenO;
+            }
+          } else if (tmp_state == closeservercom) {
+            if (PassToken(&next_server, &token) != success) {
+              goto error_tokenO;
+            }
+            if (CloseServers(&prev_server, &next_server) != success) {
               goto error_tokenO;
             }
           } else if (tmp_state == pass) {
@@ -1467,24 +1500,32 @@ int main(int argc, char const *argv[])
     }
     // Socket action - next
 
-    if (FD_ISSET(client.fd, &rfds)) {
+    if (client.fd != -1
+      && FD_ISSET(client.fd, &rfds)) {
       switch (HandleClient(&client)) {
         case start_service :
-          service_state = busy;
-          if (despatch_state == true && next_server.fd == -1
-            && WithdrawDespatch(&service_net, &central_server) != success) {
+          if (despatch_state == true && next_server.fd == -1) {
+            if (WithdrawDespatch(&service_net, &central_server) == success) {
+              ring_state = busy;
+            } else {
+              goto error_client;
+            }
           } else if (despatch_state == true
             && SendTokenS(&service_net, &next_server) != success) {
             goto error_client;
           } else {
             // Do nothing
           }
+          service_state = busy;
           break;
         case terminate_service :
           service_state = available;
-          if (ring_state == busy && next_server.fd == -1
-            && SetDespatch(&service_net, &central_server) != success) {
-            goto error_client;
+          if (next_server.fd == -1) {
+            if (SetDespatch(&service_net, &central_server) == success) {
+              ring_state = available;
+            } else {
+              goto error_client;
+            }
           } else if (ring_state == busy
             && SendTokenD(&service_net, &next_server) != success) {
             goto error_client;
