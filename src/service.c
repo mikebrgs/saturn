@@ -36,6 +36,7 @@ typedef int state;
 #define closecom 106
 #define ignore 107
 #define closeservercom 108
+#define servicebusy
 
 // Client interaction
 #define start_service 201
@@ -602,10 +603,13 @@ state HandleTokenS(ServerNet * service_net,
     || strcmp(type_tmp, "S") != 0) {
     return error;
   }
-  if (service_state == available) {
-    return handle;
-  } else if (despatch_state == true) {
+  if (strcmp(service_net->id, server->id) == 0
+    && (service_state == busy || service_state == leaving)) {
     return closecom;
+  } else if (strcmp(service_net->id, server->id) == 0) {
+    return error;
+  } else if (service_state == available) {
+    return handle;
   }
   return pass;
 }
@@ -692,6 +696,10 @@ state HandleTokenN(ServerNet * service_net,
   }
   if (strcmp(token_tmp, "TOKEN") != 0
     || strcmp(type_tmp, "N") != 0) {
+    return error;
+  }
+  if (strcmp(service_net->id, master_tmp) == 0) {
+    printf("service.HandleTokenN: repeated ID\n");
     return error;
   }
   if (strcmp(service_net->next_server.id, master_tmp) == 0) {
@@ -1386,6 +1394,8 @@ int main(int argc, char const *argv[])
             if (SendTokenO(&service_net, &next_server) != success) {
               goto error_tokenI;
             }
+          } else if (tmp_state == handle && service_state == busy) {
+            // Do nothing
           } else if (tmp_state == pass) {
             if (PassToken(&next_server, &token) != success) {
               goto error_tokenI;
@@ -1513,7 +1523,8 @@ int main(int argc, char const *argv[])
               goto error_client;
             }
           } else if (despatch_state == true
-            && SendTokenS(&service_net, &next_server) != success) {
+            && (WithdrawDespatch(&service_net, &central_server) != success
+            || SendTokenS(&service_net, &next_server) != success)) {
             goto error_client;
           } else {
             // Do nothing
@@ -1521,7 +1532,6 @@ int main(int argc, char const *argv[])
           service_state = busy;
           break;
         case terminate_service :
-          service_state = available;
           if (next_server.fd == -1) {
             if (SetDespatch(&service_net, &central_server) == success) {
               ring_state = available;
@@ -1534,6 +1544,7 @@ int main(int argc, char const *argv[])
           } else {
             // Do nothing
           }
+          service_state = available;
           break;
         default :
           error_client:
