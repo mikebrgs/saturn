@@ -47,7 +47,7 @@ state GetDespatch(int *cs_fd,
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
   strcat(cs_buffer, "GET_DS_SERVER ");
   strcat(cs_buffer, *splitted_buffer);
-  printf("reqserv: request: %s\n", cs_buffer);
+  printf("reqserv.GetDespatch.request: %s\n", cs_buffer);
   int n = sendto(*cs_fd,
     cs_buffer,
     sizeof(char)*strlen(cs_buffer),
@@ -72,7 +72,7 @@ state GetDespatch(int *cs_fd,
     return error;
   }
   cs_buffer[strlen(cs_buffer)] = ';';
-  printf("reqserv: response: %s\n", cs_buffer);
+  printf("reqserv.GetDespatch.response: %s\n", cs_buffer);
   char *splitted_buffer_recv = strtok(cs_buffer, " ");
   splitted_buffer_recv = strtok(NULL, ";");
   if (splitted_buffer_recv == NULL) {
@@ -117,7 +117,7 @@ state StartService(Server * server_data,
     printf("3\n");
     return error;
   }
-  printf("reqserv: request: %s\n", server_buffer);
+  printf("reqserv.StartService.request: %s\n", server_buffer);
   int addrlen;
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
@@ -125,7 +125,7 @@ state StartService(Server * server_data,
     printf("4\n");
     return error;
   }
-  printf("reqserv: response: %s\n", server_buffer);
+  printf("reqserv.StartService.response: %s\n", server_buffer);
 
   if (strcmp(server_buffer, "YOUR_SERVICE ON") != 0) {
     return error;
@@ -140,6 +140,7 @@ state EndService(Server * server_data,
   char server_buffer[BUFFER_SIZE];
   memset((void*)&(server_buffer), (int)'\0', sizeof(server_buffer));
   strcpy(server_buffer, "MY_SERVICE OFF");
+  printf("reqserv.EndService.request: %s\n", server_buffer);
   if (sendto(server_connection->fd, server_buffer,
     strlen(server_buffer)*sizeof(char), 0,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
@@ -151,6 +152,7 @@ state EndService(Server * server_data,
     (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
     return error;
   }
+  printf("reqserv.EndService.response: %s\n", server_buffer);
   if (strcmp(server_buffer, "YOUR_SERVICE OFF") != 0) {
     return error;
   }
@@ -175,15 +177,6 @@ int main(int argc, char const *argv[]) {
     exit(1);
   }
 
-  // Preparing standard options
-  h = gethostbyname("tejo.tecnico.ulisboa.pt");
-  if (h==NULL){
-    printf("reqserv: not able to connect to tejo\n");
-    return -1;
-  }
-  cs_addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
-  cs_addr.sin_port = htons(59000);
-
   // Evaluating arguments
   bool csip_acquired = false;
   bool cspt_acquired = false;
@@ -207,6 +200,17 @@ int main(int argc, char const *argv[]) {
       cspt_acquired = true;
       printf("reqserv: acquired pt\n");
     }
+  }
+  if (csip_acquired == false) {
+    h = gethostbyname("tejo.tecnico.ulisboa.pt");
+    if (h==NULL){
+      printf("reqserv: not able to connect to tejo\n");
+      return -1;
+    }
+    cs_addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
+  }
+  if (cspt_acquired == false) {
+    cs_addr.sin_port = htons(59000);
   }
 
   state reqserv_state = disconnected;
