@@ -677,7 +677,14 @@ state HandleTokenD(ServerNet * service_net,
 state HandleTokenNW(ServerNet * service_net,
   Connection * next_server,
   String * token_buffer) {
+  char token_tmp[BUFFER_SIZE], id_tmp[BUFFER_SIZE], ip_tmp[BUFFER_SIZE],
+    port_tmp[BUFFER_SIZE];
   printf("service.HandleTokenNW: %s", token_buffer->string);
+  sscanf(token_buffer->string, "%s %[^;];%[^;];%[^\n]\n", token_tmp,
+    id_tmp, ip_tmp, port_tmp);
+  if (strcmp(id_tmp, service_net->id) == 0) {
+    return error;
+  }
   if (next_server->fd == -1) {
     return handle;
   }
@@ -1106,8 +1113,14 @@ int main(int argc, char const *argv[])
       && id_acquired == false
       && argc > i) {
       strcpy(service_net.id, argv[i+1]);
+      int tmp_id;
+      if (sscanf(service_net.id, "%d", &tmp_id) != 1
+        || tmp_id <= 0) {
+        printf("service: ID must be positive\n");
+        return 1;
+      }
       id_acquired = true;
-      printf("service: acquired id %s\n", service_net.id);
+      printf("service: acquired id\n");
     }
     // IP
     else if (strcmp("-j", argv[i])==0
