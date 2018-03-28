@@ -64,7 +64,7 @@ state GetDespatch(int *cs_fd,
   n=recvfrom(*cs_fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)&cs_addr,(socklen_t*)&tmp);
+    0,(struct sockaddr*)cs_addr,(socklen_t*)&tmp);
   if (n==-1) {
     char error_buffer[1024];
     perror(error_buffer);
