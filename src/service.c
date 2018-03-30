@@ -186,6 +186,8 @@ state GetDespatch(ServerNet * service_net,
   if (n==-1) {
     return error;
   }
+  if (verbose_option)
+    printf("service.GetDespatch.response: %s\n", cs_buffer);
   if (strcmp(cs_buffer, "OK 0;0.0.0.0;0") == 0) {
     return busy;
   }
@@ -1041,7 +1043,7 @@ state OpenClientServer(ServerNet *service_net,
   }
   if (setsockopt(client->fd, SOL_SOCKET, SO_RCVTIMEO,
     &timeout_udp, sizeof(timeout_udp)) < 0) {
-    perror("service.OpenClientServer: socket options error\n");
+    printf("service.OpenClientServer: socket options error\n");
   }
   memset((void*)&(client->addr), (int)'\0', sizeof(client->addr));
   client->addr.sin_family = AF_INET;
@@ -1072,7 +1074,8 @@ state HandleClient(Connection *client) {
     && service_state == available) {
     memset((void*)&(client_buffer), (int)'\0', sizeof(char)*BUFFER_SIZE);
     strcpy(client_buffer, "YOUR_SERVICE ON");
-    printf("service: response: %s\n", client_buffer);
+    if (verbose_option)
+      printf("service: response: %s\n", client_buffer);
     if (sendto(client->fd, client_buffer,
       sizeof(char)*strlen(client_buffer),
       0, (struct sockaddr*)&(client->addr), tmp) == -1) {
@@ -1135,7 +1138,7 @@ int main(int argc, char const *argv[])
   }
   if (setsockopt(central_server.fd, SOL_SOCKET, SO_RCVTIMEO,
     &timeout_udp, sizeof(timeout_udp)) < 0) {
-    perror("service: socket options error\n");
+    printf("service: socket options error\n");
   }
 
   Connection listen_server;
@@ -1235,9 +1238,8 @@ int main(int argc, char const *argv[])
       printf("-p <central server's port> -- not mandatory\n");
       printf("-v -- print debug info during runtime -- not mandatory\n");
       printf("-h -- show info -- not mandatory\n");
-      printf("./build/service –n id –j ip -u upt –t tpt [-i csip] [-p cspt] [-v]\n");
-
-      return 1;
+      printf("./build/service –n id –j ip -u upt –t tpt [-i csip] [-p cspt] [-v] [-h]\n");
+      return 0;
     }
   }
 
