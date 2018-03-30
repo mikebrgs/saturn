@@ -26,69 +26,62 @@ typedef int state;
 #define success 200
 #define error 201
 
+// Global variables
+bool verbose_option = false;
+struct timeval timeout_udp;
+
 typedef struct Server {
   char id [BUFFER_SIZE];
   char ip[16];
   char port[16];
 } Server;
 
+// Local structures
 typedef struct Connection {
   int fd;
   struct sockaddr_in addr;
 } Connection;
 
-state GetDespatch(int *cs_fd,
-  char **splitted_buffer,
-  struct sockaddr_in *cs_addr,
+typedef struct String {
+  char string[BUFFER_SIZE];
+} String;
+
+// Local functions
+state GetDespatch(Connection * central_server,
+  String *service_id,
   Server *server) {
   char cs_buffer[BUFFER_SIZE];
   int tmp;
 
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
-  strcat(cs_buffer, "GET_DS_SERVER ");
-  strcat(cs_buffer, *splitted_buffer);
-  printf("reqserv.GetDespatch.request: %s\n", cs_buffer);
-  int n = sendto(*cs_fd,
-    cs_buffer,
+  sprintf(cs_buffer, "GET_DS_SERVER %s", service_id->string);
+  if (verbose_option)
+    printf("reqserv.GetDespatch.request: %s\n", cs_buffer);
+  int n = sendto(central_server->fd, cs_buffer,
     sizeof(char)*strlen(cs_buffer),
-    0, (struct sockaddr*)cs_addr,
-    sizeof(*cs_addr));
+    0, (struct sockaddr*)&(central_server->addr),
+    sizeof(central_server->addr));
   if (n == -1) {
-    char error_buffer[1024];
-    perror(error_buffer);
-    printf("reqserv: sendto() error - %s\n", error_buffer);
+    printf("reqserv.GetDespatch.sendto: error\n");
     return error;
   }
   // Waiting and saving response
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
-  n=recvfrom(*cs_fd,
+  n=recvfrom(central_server->fd,
     cs_buffer,
     BUFFER_SIZE,
-    0,(struct sockaddr*)cs_addr,(socklen_t*)&tmp);
+    0,(struct sockaddr*)&(central_server->addr),(socklen_t*)&tmp);
   if (n==-1) {
-    char error_buffer[1024];
-    perror(error_buffer);
-    printf("reqserv: recvfrom() error - %s\n", error_buffer);
+    printf("reqserv.GetDespatch.recvfrom: error\n");
     return error;
   }
-  cs_buffer[strlen(cs_buffer)] = ';';
-  printf("reqserv.GetDespatch.response: %s\n", cs_buffer);
-  char *splitted_buffer_recv = strtok(cs_buffer, " ");
-  splitted_buffer_recv = strtok(NULL, ";");
-  if (splitted_buffer_recv == NULL) {
+  if (verbose_option)
+    printf("reqserv.GetDespatch.response: %s\n", cs_buffer);
+  char token_tmp[BUFFER_SIZE];
+  if (sscanf(cs_buffer, "%s %[^;];%[^;];%s", token_tmp, server->id,
+    server->ip, server->port) != 4) {
     return error;
   }
-  strcpy(server->id, splitted_buffer_recv);
-  splitted_buffer_recv = strtok(NULL, ";");
-  if (splitted_buffer_recv == NULL) {
-    return error;
-  }
-  strcpy(server->ip, splitted_buffer_recv);
-    splitted_buffer_recv = strtok(NULL, ";");
-  if (splitted_buffer_recv == NULL) {
-    return error;
-  }
-  strcpy(server->port, splitted_buffer_recv);
   return success;
 }
 
@@ -99,6 +92,11 @@ state StartService(Server * server_data,
     printf("1\n");
     return error;
   }
+  if (setsockopt(server_connection->fd, SOL_SOCKET, SO_RCVTIMEO,
+    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    printf("service: socket options error\n");
+  }
+
 
   memset((void*)&(server_connection->addr), (int)'\0', sizeof(server_connection->addr));
   server_connection->addr.sin_family = AF_INET;
@@ -111,13 +109,14 @@ state StartService(Server * server_data,
   char server_buffer[BUFFER_SIZE];
   memset((void*)&(server_buffer), (int)'\0', sizeof(server_buffer));
   strcpy(server_buffer, "MY_SERVICE ON");
+  if (verbose_option)
+    printf("reqserv.StartService.request: %s\n", server_buffer);
   if (sendto(server_connection->fd, server_buffer,
     strlen(server_buffer)*sizeof(char), 0,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
     printf("3\n");
     return error;
   }
-  printf("reqserv.StartService.request: %s\n", server_buffer);
   int addrlen;
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
@@ -125,7 +124,8 @@ state StartService(Server * server_data,
     printf("4\n");
     return error;
   }
-  printf("reqserv.StartService.response: %s\n", server_buffer);
+  if (verbose_option)
+    printf("reqserv.StartService.response: %s\n", server_buffer);
 
   if (strcmp(server_buffer, "YOUR_SERVICE ON") != 0) {
     return error;
@@ -140,7 +140,8 @@ state EndService(Server * server_data,
   char server_buffer[BUFFER_SIZE];
   memset((void*)&(server_buffer), (int)'\0', sizeof(server_buffer));
   strcpy(server_buffer, "MY_SERVICE OFF");
-  printf("reqserv.EndService.request: %s\n", server_buffer);
+  if (verbose_option)
+    printf("reqserv.EndService.request: %s\n", server_buffer);
   if (sendto(server_connection->fd, server_buffer,
     strlen(server_buffer)*sizeof(char), 0,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
@@ -152,7 +153,8 @@ state EndService(Server * server_data,
     (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
     return error;
   }
-  printf("reqserv.EndService.response: %s\n", server_buffer);
+  if (verbose_option)
+    printf("reqserv.EndService.response: %s\n", server_buffer);
   if (strcmp(server_buffer, "YOUR_SERVICE OFF") != 0) {
     return error;
   }
@@ -162,25 +164,39 @@ state EndService(Server * server_data,
 
 int main(int argc, char const *argv[]) {
   // Reading input options
-  struct sockaddr_in cs_addr;
-  struct hostent *h;
-  int cs_fd;
-  Server server_data;
+  Server service;
+
+  // UDP timeout times
+  timeout_udp.tv_sec = 2;
+  timeout_udp.tv_usec = 0;
+
+  // Central server connection
+  Connection central_server;
+  central_server.fd = -1;
+  
+  // Service server connection
   Connection server_connection;
+  server_connection.fd = -1;
+  
 
-  memset((void*)&cs_addr, (int)'\0', sizeof(cs_addr));
-  cs_addr.sin_family = AF_INET;
-
-  cs_fd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (cs_fd == -1) {
+  memset((void*)&(central_server.addr), (int)'\0', sizeof(central_server.addr));
+  central_server.addr.sin_family = AF_INET;
+  central_server.fd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (central_server.fd == -1) {
     printf("reqserv: socket() error\n");
     exit(1);
   }
+  if (setsockopt(central_server.fd, SOL_SOCKET, SO_RCVTIMEO,
+    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    printf("service: socket options error\n");
+  }
+
 
   // Evaluating arguments
   bool csip_acquired = false;
   bool cspt_acquired = false;
-  for (size_t i=1; i<argc; i=i+2) {
+  struct hostent *h;
+  for (size_t i=1; i<argc; i++) {
     if (strcmp("-i",argv[i])==0 
       && csip_acquired==false
       && argc > i) {
@@ -189,16 +205,30 @@ int main(int argc, char const *argv[]) {
         printf("reqserv: not able to connect to %s\n", argv[i+1]);
         continue;
       }
-      cs_addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
+      central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
       csip_acquired = true;
       printf("reqserv: acquired ip\n");
+      i++;
     }
     else if (strcmp("-p",argv[i])==0
       && cspt_acquired==false
       && argc > i) {
-      cs_addr.sin_port = htons(atoi(argv[i+1]));
+      central_server.addr.sin_port = htons(atoi(argv[i+1]));
       cspt_acquired = true;
       printf("reqserv: acquired pt\n");
+      i++;
+    }
+    else if (strcmp("-v", argv[i]) == 0) {
+      printf("service: debug info will be printed :)\n");
+      verbose_option = true;
+    }
+    else if (strcmp("-h", argv[i]) == 0) {
+      printf("-i <central server's ip> -- not mandatory\n");
+      printf("-p <central server's port> -- not mandatory\n");
+      printf("-v -- print debug info during runtime -- not mandatory\n");
+      printf("-h -- show info -- not mandatory\n");
+      printf("./build/service [-i csip] [-p cspt] [-v] [-h]\n");
+      return 0;
     }
   }
   if (csip_acquired == false) {
@@ -207,35 +237,34 @@ int main(int argc, char const *argv[]) {
       printf("reqserv: not able to connect to tejo\n");
       return -1;
     }
-    cs_addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
+    central_server.addr.sin_addr = *(struct in_addr*)h->h_addr_list[0];
   }
   if (cspt_acquired == false) {
-    cs_addr.sin_port = htons(59000);
+    central_server.addr.sin_port = htons(59000);
   }
 
   state reqserv_state = disconnected;
-  char kb_buffer[BUFFER_SIZE];
+  char kb_buffer[BUFFER_SIZE], command_buffer[BUFFER_SIZE];
+  String service_buffer;
 
   while (reqserv_state != exiting) {
-    printf("user: ");
+    // printf("user: ");
     fgets(kb_buffer, BUFFER_SIZE, stdin);
-    if (strlen(kb_buffer) <= 1) continue;
-    kb_buffer[strlen(kb_buffer)-1]='\0';
-    char * splitted_buffer = strtok(kb_buffer, " ");
+    // Command evaluation
+    int scan_args = sscanf(kb_buffer, "%s %s\n", command_buffer,
+      service_buffer.string);
+    if (scan_args < 1) continue;
     // State evaluation
     // Connection to central service
-    if ((strcmp(splitted_buffer, "request_service")==0
-      || strcmp(splitted_buffer, "rs") == 0)
+    if (scan_args >= 2
+      && (strcmp(command_buffer, "request_service")==0
+      || strcmp(command_buffer, "rs") == 0)
       && reqserv_state == disconnected) {
-      splitted_buffer = strtok(NULL, " ");
-      if (splitted_buffer==NULL) {
-        goto invalid;
-      }
-      if (GetDespatch(&cs_fd, &splitted_buffer, &cs_addr, &server_data) == error) {
+      if (GetDespatch(&central_server, &service_buffer, &service) == error) {
         printf("reqserv: error in GetDespatch()\n");
         continue;
       }
-      if (StartService(&server_data, &server_connection) == error) {
+      if (StartService(&service, &server_connection) == error) {
         printf("reqserv: error in StartService()\n");
         continue;
       }
@@ -243,10 +272,10 @@ int main(int argc, char const *argv[]) {
       printf("reqserv: connected\n");
     }
     // Disconnection of central service
-    else if ((strcmp(splitted_buffer, "terminate_service")==0
-      || strcmp(splitted_buffer, "ts") == 0)
+    else if ((strcmp(command_buffer, "terminate_service")==0
+      || strcmp(command_buffer, "ts") == 0)
       && reqserv_state == connected) {
-      if (EndService(&server_data, &server_connection) == error) {
+      if (EndService(&service, &server_connection) == error) {
         printf("reqserv: error in EndService()\n");
         continue;
       }
@@ -254,14 +283,13 @@ int main(int argc, char const *argv[]) {
       printf("reqserv: disconnected\n");
     }
     // Exit client
-    else if(strcmp(splitted_buffer, "exit")==0
+    else if(strcmp(command_buffer, "exit")==0
       && reqserv_state == disconnected) {
       reqserv_state = exiting;
       printf("exiting\n");
     }
     // Invalid commands
     else {
-      invalid:
       printf("reqserv: invalid command\n");
     }
   }
