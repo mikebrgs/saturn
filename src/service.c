@@ -89,6 +89,7 @@ state ring_state = disconnected;
 bool despatch_state = false;
 bool start_state = false;
 bool waiting_to_leave = false;
+bool joinning_ring = false;
 bool verbose_option = false;
 
 struct timeval timeout_udp;
@@ -103,6 +104,8 @@ int Max(int a, int b) {
 
 bool BiggerID(ServerNet * service_net,
   Server * server) {
+  if (verbose_option)
+    printf("service.BiggerID: %d, %d\n", atoi(service_net->id), atoi(server->id));
   if (atoi(service_net->id) > atoi(server->id))
     return true;
   return false;
@@ -692,11 +695,17 @@ state HandleTokenD(ServerNet * service_net,
   }
   ring_state = available;
   if (strcmp(server.id, service_net->id) == 0) {
+    if (verbose_option)
+      printf("service.HandleTokenD: handling\n");
     return handle;
-  } else if (service_state == joinning
+  } else if (joinning_ring == true
     && BiggerID(service_net, &server)) {
+    if (verbose_option)
+      printf("service.HandleTokenD: ignoring\n");
     return ignore;
   }
+  if (verbose_option)
+    printf("service.HandleTokenD: passing\n");
   return pass;
 }
 
@@ -1337,11 +1346,12 @@ int main(int argc, char const *argv[])
               && SendTokenNW(&service_net, &next_server) == success
               && AcceptRing(&service_net, &listen_server, &prev_server) == success
               && OpenClientServer(&service_net, &client) == success) {
-              if (GetDespatch(&service_net, &central_server) == busy
+              state despatch_state = GetDespatch(&service_net, &central_server);
+              if (despatch_state == busy
                 && SendTokenD(&service_net, &next_server) == success) {
                 service_state = available;
                 ring_state = busy;
-              } else if (GetDespatch(&service_net, &central_server) == available) {
+              } else if (despatch_state == available) {
                 service_state = available;
                 ring_state = available;
               } else {
@@ -1643,6 +1653,7 @@ int main(int argc, char const *argv[])
       && FD_ISSET(client.fd, &rfds)) {
       switch (HandleClient(&client)) {
         case start_service :
+          joinning_ring = false;
           if (despatch_state == true && next_server.fd == -1) {
             if (WithdrawDespatch(&service_net, &central_server) == success) {
               ring_state = busy;
@@ -1659,6 +1670,7 @@ int main(int argc, char const *argv[])
           service_state = busy;
           break;
         case terminate_service :
+          joinning_ring = true;
           if (next_server.fd == -1) {
             if (SetDespatch(&service_net, &central_server) == success) {
               ring_state = available;
