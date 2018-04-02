@@ -66,12 +66,13 @@ state GetDespatch(Connection * central_server,
     return error;
   }
   // Waiting and saving response
+  tmp = sizeof(central_server->addr);
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
-  n=recvfrom(central_server->fd,
-    cs_buffer,
-    BUFFER_SIZE,
+  n=recvfrom(central_server->fd, cs_buffer, BUFFER_SIZE,
     0,(struct sockaddr*)&(central_server->addr),(socklen_t*)&tmp);
   if (n==-1) {
+    char error_buffer[BUFFER_SIZE];
+    perror(error_buffer);
     printf("reqserv.GetDespatch.recvfrom: error\n");
     return error;
   }
@@ -114,7 +115,7 @@ state StartService(Server * server_data,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
     return error;
   }
-  int addrlen;
+  int addrlen = sizeof(server_connection->addr);
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
     (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
@@ -142,7 +143,7 @@ state EndService(Server * server_data,
     (struct sockaddr*)&(server_connection->addr), sizeof(server_connection->addr)) == -1) {
     return error;
   }
-  int addrlen;
+  int addrlen = sizeof(server_connection->addr);
   if (recvfrom(server_connection->fd, server_buffer,
     BUFFER_SIZE, 0,
     (struct sockaddr*)&(server_connection->addr), (socklen_t*)&addrlen) == -1) {
