@@ -693,19 +693,29 @@ state HandleTokenD(ServerNet * service_net,
     || strcmp(type_tmp, "D") != 0) {
     return error;
   }
-  ring_state = available;
   if (strcmp(server.id, service_net->id) == 0) {
     if (verbose_option)
       printf("service.HandleTokenD: handling\n");
+    ring_state = available;
     return handle;
+  } else if (ring_state == available) {
+    // If the ring is available, there is no point in passing this token
+    if (verbose_option)
+      printf("service.HandleTokenD: ignoring -- available ring\n");
+    ring_state = available;
+    return ignore;
   } else if (joinning_ring == true
     && BiggerID(service_net, &server)) {
+    // If the this service has bigger ID, do not allow next server
     if (verbose_option)
-      printf("service.HandleTokenD: ignoring\n");
+      printf("service.HandleTokenD: ignoring -- lower ID\n");
+    ring_state = available;
     return ignore;
   }
+  joinning_ring = false;
   if (verbose_option)
     printf("service.HandleTokenD: passing\n");
+  ring_state = available;
   return pass;
 }
 
@@ -1341,22 +1351,15 @@ int main(int argc, char const *argv[])
             }
             break;
           case join :
+            joinning_ring = true;
             if (ConnectRing(&service_net, &next_server,
                 &listen_server) == success
               && SendTokenNW(&service_net, &next_server) == success
               && AcceptRing(&service_net, &listen_server, &prev_server) == success
-              && OpenClientServer(&service_net, &client) == success) {
-              state despatch_state = GetDespatch(&service_net, &central_server);
-              if (despatch_state == busy
-                && SendTokenD(&service_net, &next_server) == success) {
-                service_state = available;
-                ring_state = busy;
-              } else if (despatch_state == available) {
-                service_state = available;
-                ring_state = available;
-              } else {
-                goto join_error;
-              }
+              && OpenClientServer(&service_net, &client) == success
+              && SendTokenD(&service_net, &next_server) == success) {
+              service_state = available;
+              ring_state = available;
               printf("service: join success\n");
             } else {
               goto join_error;
