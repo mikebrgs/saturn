@@ -568,7 +568,7 @@ token HandleToken(ServerNet *service_net,
   char * token_pointer = &(token_buffer->string)[0];
 
   while (1) {
-    token_read = read(prev_server->fd, token_pointer, BUFFER_SIZE);
+    token_read = read(prev_server->fd, token_pointer, 1);
     if (token_read <= 0) {
       return error;
     }
