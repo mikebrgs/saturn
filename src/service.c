@@ -132,6 +132,7 @@ state GetStart(ServerNet * service_net,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  tmp = sizeof(central_server->addr);
   n=recvfrom(central_server->fd,
     cs_buffer,
     BUFFER_SIZE,
@@ -181,6 +182,7 @@ state GetDespatch(ServerNet * service_net,
   if (n == -1) {
     return error;
   }
+  tmp = sizeof(central_server->addr);
   memset((void*)&cs_buffer, (int)'\0', BUFFER_SIZE*sizeof(char));
   n=recvfrom(central_server->fd,
     cs_buffer,
@@ -220,6 +222,7 @@ state SetStart(ServerNet * service_net,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  tmp = sizeof(central_server->addr);
   int n_recv = recvfrom(central_server->fd, cs_buffer, BUFFER_SIZE*sizeof(char),
     0,(struct sockaddr*)&(central_server->addr), (socklen_t*)&tmp);
   if (n_recv==-1) {
@@ -267,6 +270,7 @@ state SetDespatch(ServerNet * service_net,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  tmp = sizeof(central_server->addr);
   n=recvfrom(central_server->fd, cs_buffer, BUFFER_SIZE,
     0,(struct sockaddr*)&(central_server->addr), (socklen_t*)&tmp);
   if (n==-1) {
@@ -491,6 +495,7 @@ state WithdrawDespatch(ServerNet * service_net,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  tmp = sizeof(central_server->addr);
   int n_recv=recvfrom(central_server->fd, cs_buffer, BUFFER_SIZE,
     0,(struct sockaddr*)&(central_server->addr), (socklen_t*)&tmp);
   if (n_recv==-1) {
@@ -533,6 +538,7 @@ state WithdrawStart(ServerNet * service_net,
   // printf("SENT\n");
   // Waiting for response
   memset((void*)&cs_buffer, (int)'\0', sizeof(char)*BUFFER_SIZE);
+  tmp = sizeof(central_server->addr);
   int n_recv=recvfrom(central_server->fd, cs_buffer, BUFFER_SIZE,
     0,(struct sockaddr*)&(central_server->addr), (socklen_t*)&tmp);
   if (n_recv==-1) {
