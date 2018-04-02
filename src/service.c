@@ -748,9 +748,9 @@ state HandleTokenN(ServerNet * service_net,
     || strcmp(type_tmp, "N") != 0) {
     return error;
   }
-  if (strcmp(service_net->id, master_tmp) == 0) {
-    printf("service.HandleTokenN: repeated ID\n");
-    return error;
+  if (strcmp(service_net->id, new_server.id) == 0) {
+    printf("service.HandleTokenN: connected\n");
+    return ignore;
   }
   if (strcmp(service_net->next_server.id, master_tmp) == 0) {
     return handle;
@@ -1411,11 +1411,15 @@ int main(int argc, char const *argv[])
         && service_state == available) {
         if (next_server.fd == -1) {
           if (WithdrawStart(&service_net, &central_server) != success) {
-            goto invalid;
+            goto error_leaving_disc;
+            // goto invalid;
           }
           if (WithdrawDespatch(&service_net, &central_server) != success) {
-            goto invalid;
+            goto error_leaving_disc;
+            // goto invalid;
           }
+          error_leaving_disc:
+          // Forcing leave when there's an error witht the connections
           if (CloseConnections(&prev_server, &next_server, &client) != success) {
             goto invalid;
           }
@@ -1426,25 +1430,40 @@ int main(int argc, char const *argv[])
           service_state = leaving;
           if (start_state == true) {
             if (WithdrawStart(&service_net, &central_server) != success) {
-              goto invalid;
+              goto error_leaving_con;
+              // goto invalid;
             }
             if (SendTokenNS(&service_net, &next_server) != success) {
-              goto invalid;
+              goto error_leaving_con;
+              // goto invalid;
             }
           }
           if (despatch_state == true) {
             if (WithdrawDespatch(&service_net, &central_server) != success) {
-              goto invalid;
+              goto error_leaving_con;
+              // goto invalid;
             }
             if (SendTokenS(&service_net, &next_server) != success) {
-              goto invalid;
+              goto error_leaving_con;
+              // goto invalid;
             } else {
               goto jumpO;
             }
           }
           if (SendTokenO(&service_net, &next_server) != success) {
-            goto invalid;
+            goto error_leaving_con;
+            // goto invalid;
+          } else {
+            goto jumpO;
           }
+          // Forcing leave when there's an error with the connections
+          // ***************************************************
+          error_leaving_con:
+          printf("service: error leaving - forcing\n");
+          CloseConnections(&prev_server, &next_server, &client);
+          service_state = disconnected;
+          ring_state = disconnected;
+          // ***************************************************
           jumpO:
           if (verbose_option)
             printf("service: leaving\n");
@@ -1586,12 +1605,19 @@ int main(int argc, char const *argv[])
               goto error_tokenN;
             }
             if (ConnectServer(&service_net, &next_server, &new_server) != success) {
-              goto error_tokenN;
+              // Reconnect to start server -- not sure if this should be included
+              // *****************************************************
+              GetStart(&service_net, &central_server);
+              ConnectRing(&service_net, &next_server, &listen_server);
+              SendTokenNW(&service_net, &next_server);
+              // *****************************************************
             }
           } else if (tmp_state == pass) {
             if (PassToken(&next_server, &token) != success) {
               goto error_tokenN;
             }
+          } else if (tmp_state ==ignore) {
+            // Do nothing
           } else {
             error_tokenN:
             printf("service: error handling tokenN\n");
