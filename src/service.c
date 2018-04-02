@@ -693,29 +693,25 @@ state HandleTokenD(ServerNet * service_net,
     || strcmp(type_tmp, "D") != 0) {
     return error;
   }
+  ring_state = available;
   if (strcmp(server.id, service_net->id) == 0) {
     if (verbose_option)
       printf("service.HandleTokenD: handling\n");
-    ring_state = available;
     return handle;
-  } else if (ring_state == available) {
+  } else if (despatch_state == true) {
     // If the ring is available, there is no point in passing this token
     if (verbose_option)
       printf("service.HandleTokenD: ignoring -- available ring\n");
-    ring_state = available;
     return ignore;
   } else if (joinning_ring == true
     && BiggerID(service_net, &server)) {
     // If the this service has bigger ID, do not allow next server
     if (verbose_option)
       printf("service.HandleTokenD: ignoring -- lower ID\n");
-    ring_state = available;
     return ignore;
   }
-  joinning_ring = false;
   if (verbose_option)
     printf("service.HandleTokenD: passing\n");
-  ring_state = available;
   return pass;
 }
 
