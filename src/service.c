@@ -1,3 +1,5 @@
+#define _BSD_SOURCE
+
 // C includes
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +17,7 @@
 // System
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/types.h>
 
 
 typedef int bool;
@@ -317,13 +320,16 @@ state AcceptServer(ServerNet *service_net,
     printf("service.AcceptServer\n");
   int addrlen = sizeof(listen_server->addr);
   int old_fd = prev_server->fd;
+
   prev_server->fd = accept(listen_server->fd,
     (struct sockaddr*)&(listen_server->addr), (socklen_t*)&addrlen);
   if (prev_server->fd == -1) {
     prev_server->fd = old_fd;
     return error;
   }
-
+  if (old_fd != -1) {
+    close(old_fd);
+  }
   prev_server->addr = listen_server->addr;
   return success;
 }
@@ -443,15 +449,18 @@ state CloseConnections(Connection * prev_server,
   Connection * client) {
   if (verbose_option)
     printf("service.CloseConnections\n");
-  if (next_server->fd != -1) {
-    close(next_server->fd);
-  }
-  next_server->fd = -1;
   if (prev_server->fd != -1) {
+    shutdown(prev_server->fd, SHUT_RDWR);
     close(prev_server->fd);
   }
   prev_server->fd = -1;
+  if (next_server->fd != -1) {
+    shutdown(next_server->fd, SHUT_RDWR);
+    close(next_server->fd);
+  }
+  next_server->fd = -1;
   if (client->fd != -1) {
+    shutdown(client->fd, SHUT_RDWR);
     close(client->fd);
   }
   client->fd = -1;
@@ -462,11 +471,22 @@ state CloseServers(Connection * prev_server,
   Connection * next_server) {
   if (verbose_option)
     printf("service.CloseServers\n");
+  char close_buffer[BUFFER_SIZE];
+  int close_size = read(prev_server->fd,
+    close_buffer, BUFFER_SIZE);
+  if (verbose_option)
+    printf("service.CloseServers.read.prev_server %d\n", close_size);
   if (prev_server->fd != -1) {
+    shutdown(prev_server->fd, SHUT_RDWR);
     close(prev_server->fd);
     prev_server->fd = -1;
   }
+  close_size = read(next_server->fd,
+    close_buffer, BUFFER_SIZE);
+  if (verbose_option)
+    printf("service.CloseServers.read.next_server %d\n", close_size);
   if (next_server->fd != -1) {
+    shutdown(next_server->fd, SHUT_RDWR);
     close(next_server->fd);
     next_server->fd = -1;
   }
@@ -1063,7 +1083,7 @@ state OpenClientServer(ServerNet *service_net,
     return error;
   }
   if (setsockopt(client->fd, SOL_SOCKET, SO_RCVTIMEO,
-    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    &timeout_udp, sizeof(struct timeval)) < 0) {
     printf("service.OpenClientServer: socket options error\n");
   }
   memset((void*)&(client->addr), (int)'\0', sizeof(client->addr));
@@ -1158,7 +1178,7 @@ int main(int argc, char const *argv[])
     exit(1);
   }
   if (setsockopt(central_server.fd, SOL_SOCKET, SO_RCVTIMEO,
-    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    &timeout_udp, sizeof(struct timeval)) < 0) {
     printf("service: socket options error\n");
   }
 
@@ -1182,7 +1202,8 @@ int main(int argc, char const *argv[])
   bool ip_acquired = false;
   bool upt_acquired = false;
   bool tpt_acquired = false;
-  for (size_t i=1; i<argc; i++) {
+  size_t i;
+  for (i=1; i<argc; i++) {
     // CS IP
     if (strcmp("-i",argv[i])==0 
       && csip_acquired==false
