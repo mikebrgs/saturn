@@ -42,7 +42,7 @@ typedef int state;
 #define closecom 106
 #define ignore 107
 #define closeservercom 108
-#define servicebusy
+#define negate 109
 // Client interaction
 #define start_service 201
 #define terminate_service 202
@@ -687,11 +687,12 @@ state HandleTokenT(ServerNet * service_net,
 
 state HandleTokenI(ServerNet * service_net,
   String * token_buffer) {
-  char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE], sender_tmp[BUFFER_SIZE];
+  char token_tmp[BUFFER_SIZE], type_tmp[BUFFER_SIZE];
+  Server server;
   if (verbose_option)
     printf("service.HandleTokenI: %s\n", token_buffer->string);
   if (sscanf(token_buffer->string, "%s %[^;];%[^\n]\n", token_tmp,
-    sender_tmp, type_tmp) != 3) {
+    server.id, type_tmp) != 3) {
     return error;
   }
   if (strcmp(token_tmp, "TOKEN") != 0
@@ -699,7 +700,17 @@ state HandleTokenI(ServerNet * service_net,
     return error;
   }
   ring_state = busy;
-  if (strcmp(sender_tmp, service_net->id) == 0) {
+
+  if (despatch_state == true) {
+    return negate;
+  }
+  if (joinning_ring == true
+    && service_state == available) {
+    // Everyone online will send a tokenD, later ignored by
+    // bigger id
+    return negate;
+  }
+  if (strcmp(server.id, service_net->id) == 0) {
     return handle;
   }
   return pass;
@@ -1379,8 +1390,7 @@ int main(int argc, char const *argv[])
                 &listen_server) == success
               && SendTokenNW(&service_net, &next_server) == success
               && AcceptRing(&service_net, &listen_server, &prev_server) == success
-              && OpenClientServer(&service_net, &client) == success
-              && SendTokenD(&service_net, &next_server) == success) {
+              && OpenClientServer(&service_net, &client) == success) {
               service_state = available;
               ring_state = available;
               printf("service: join success\n");
@@ -1512,13 +1522,10 @@ int main(int argc, char const *argv[])
       && FD_ISSET(listen_server.fd, &rfds)) {
       if (verbose_option)
         printf("service: accepting new server\n");
-      switch(AcceptServer(&service_net, &listen_server, &prev_server)) {
-        case success :
-          printf("service: server connected\n");
-          break;
-        default :
-          printf("service: server invalid \n");
-          break;
+      if (AcceptServer(&service_net, &listen_server, &prev_server) == success) {
+        printf("service: server connected\n");
+      } else {
+        printf("service: server invalid \n");
       }
     }
     // Socket action - previous
@@ -1576,6 +1583,10 @@ int main(int argc, char const *argv[])
             if (SendTokenO(&service_net, &next_server) != success) {
               goto error_tokenI;
             }
+          } else if (tmp_state == negate) {
+            if (SendTokenD(&service_net, &next_server) != success) {
+              goto error_tokenI;
+            }
           } else if (tmp_state == handle && service_state == busy) {
             // Do nothing
           } else if (tmp_state == pass) {
@@ -1613,11 +1624,19 @@ int main(int argc, char const *argv[])
             if (ConnectServer(&service_net, &next_server, &new_server) != success) {
               goto error_tokenNW;
             }
+            if (ring_state == busy
+              && SendTokenI(&service_net, &next_server) != success) {
+              goto error_tokenNW;
+            }
           } else if (tmp_state == pass) {
             if (ConvertTokenNW(&token, &new_server) != success) {
               goto error_tokenNW;
             }
             if (SendTokenN(&service_net, &next_server, &new_server) != success) {
+              goto error_tokenNW;
+            }
+            if (ring_state == busy
+              && SendTokenI(&service_net, &next_server) != success) {
               goto error_tokenNW;
             }
           } else {
