@@ -1,3 +1,5 @@
+#define _BSD_SOURCE
+
 // General includes
 #include <stdlib.h>
 #include <string.h>
@@ -8,9 +10,11 @@
 
 // Networking includes
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/time.h>
 
 typedef int bool;
 #define true 1
@@ -93,14 +97,14 @@ state StartService(Server * server_data,
     return error;
   }
   if (setsockopt(server_connection->fd, SOL_SOCKET, SO_RCVTIMEO,
-    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    &timeout_udp, sizeof(struct timeval)) < 0) {
     printf("service: socket options error\n");
   }
 
 
   memset((void*)&(server_connection->addr), (int)'\0', sizeof(server_connection->addr));
   server_connection->addr.sin_family = AF_INET;
-  if (inet_aton(server_data->ip, &server_connection->addr.sin_addr) == 0) {
+  if (inet_aton(server_data->ip, &(server_connection->addr.sin_addr)) == 0) {
     return error;
   }
   server_connection->addr.sin_port = htons(atoi(server_data->port));
@@ -183,7 +187,7 @@ int main(int argc, char const *argv[]) {
     exit(1);
   }
   if (setsockopt(central_server.fd, SOL_SOCKET, SO_RCVTIMEO,
-    &timeout_udp, sizeof(timeout_udp)) < 0) {
+    &timeout_udp, sizeof(struct timeval)) < 0) {
     printf("service: socket options error\n");
   }
 
@@ -192,7 +196,8 @@ int main(int argc, char const *argv[]) {
   bool csip_acquired = false;
   bool cspt_acquired = false;
   struct hostent *h;
-  for (size_t i=1; i<argc; i++) {
+  size_t i;
+  for (i=1; i<argc; i++) {
     if (strcmp("-i",argv[i])==0 
       && csip_acquired==false
       && argc > i) {
